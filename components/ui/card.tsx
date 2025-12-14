@@ -1,92 +1,69 @@
-import * as React from 'react'
+import React from 'react'
+import { View, Text, StyleSheet, ViewStyle, TextStyle } from 'react-native'
+import { Colors } from '@/constants/Colors'
 
-import { cn } from '@/lib/utils'
-
-function Card({ className, ...props }: React.ComponentProps<'div'>) {
-  return (
-    <div
-      data-slot="card"
-      className={cn(
-        'bg-card text-card-foreground flex flex-col gap-6 rounded-xl border py-6 shadow-sm',
-        className,
-      )}
-      {...props}
-    />
-  )
+interface CardProps {
+  children?: React.ReactNode
+  style?: ViewStyle
+  className?: string
 }
 
-function CardHeader({ className, ...props }: React.ComponentProps<'div'>) {
-  return (
-    <div
-      data-slot="card-header"
-      className={cn(
-        '@container/card-header grid auto-rows-min grid-rows-[auto_auto] items-start gap-2 px-6 has-data-[slot=card-action]:grid-cols-[1fr_auto] [.border-b]:pb-6',
-        className,
-      )}
-      {...props}
-    />
-  )
+export function Card({ children, style }: CardProps) {
+  return <View style={[styles.card, style]}>{children}</View>
 }
 
-function CardTitle({ className, ...props }: React.ComponentProps<'div'>) {
-  return (
-    <div
-      data-slot="card-title"
-      className={cn('leading-none font-semibold', className)}
-      {...props}
-    />
-  )
+export function CardHeader({ children, style }: CardProps) {
+  return <View style={[styles.header, style]}>{children}</View>
 }
 
-function CardDescription({ className, ...props }: React.ComponentProps<'div'>) {
-  return (
-    <div
-      data-slot="card-description"
-      className={cn('text-muted-foreground text-sm', className)}
-      {...props}
-    />
-  )
+export function CardTitle({ children, style }: CardProps) {
+  return <Text style={[styles.title, style]}>{children}</Text>
 }
 
-function CardAction({ className, ...props }: React.ComponentProps<'div'>) {
-  return (
-    <div
-      data-slot="card-action"
-      className={cn(
-        'col-start-2 row-span-2 row-start-1 self-start justify-self-end',
-        className,
-      )}
-      {...props}
-    />
-  )
+export function CardDescription({ children, style }: CardProps) {
+  return <Text style={[styles.description, style]}>{children}</Text>
 }
 
-function CardContent({ className, ...props }: React.ComponentProps<'div'>) {
-  return (
-    <div
-      data-slot="card-content"
-      className={cn('px-6', className)}
-      {...props}
-    />
-  )
+export function CardContent({ children, style }: CardProps) {
+  return <View style={[styles.content, style]}>{children}</View>
 }
 
-function CardFooter({ className, ...props }: React.ComponentProps<'div'>) {
-  return (
-    <div
-      data-slot="card-footer"
-      className={cn('flex items-center px-6 [.border-t]:pt-6', className)}
-      {...props}
-    />
-  )
+export function CardFooter({ children, style }: CardProps) {
+  return <View style={[styles.footer, style]}>{children}</View>
 }
 
-export {
-  Card,
-  CardHeader,
-  CardFooter,
-  CardTitle,
-  CardAction,
-  CardDescription,
-  CardContent,
-}
+const styles = StyleSheet.create({
+  card: {
+    backgroundColor: Colors.card,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    padding: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  header: {
+    marginBottom: 16,
+  },
+  title: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: Colors.cardForeground,
+  },
+  description: {
+    fontSize: 14,
+    color: Colors.mutedForeground,
+    marginTop: 4,
+  },
+  content: {
+    paddingHorizontal: 0,
+  },
+  footer: {
+    marginTop: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+})

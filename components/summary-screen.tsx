@@ -1,428 +1,452 @@
-"use client"
+import React, { useState } from 'react'
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal } from 'react-native'
+import { Ionicons } from '@expo/vector-icons'
+import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { Colors } from '@/constants/Colors'
 
-import { useState } from "react"
-import {
-  ArrowLeft,
-  Share2,
-  Download,
-  CheckCircle2,
-  Calendar,
-  Save,
-  X,
-  Edit3,
-  RefreshCw,
-  FileText,
-  File,
-} from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
-import { Checkbox } from "@/components/ui/checkbox"
-import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
+import { NavigationHandler } from '@/src/types/navigation'
 
 interface SummaryScreenProps {
-  onNavigate: (
-    screen: "home" | "recording" | "processing" | "summary" | "paywall" | "settings" | "all-meetings",
-  ) => void
+  onNavigate: NavigationHandler
 }
 
 export function SummaryScreen({ onNavigate }: SummaryScreenProps) {
-  const [meetingTitle, setMeetingTitle] = useState("Q4 Planning Session")
+  const [meetingTitle, setMeetingTitle] = useState('Q4 Planning Session')
   const [isEditingTitle, setIsEditingTitle] = useState(false)
   const [summaryText, setSummaryText] = useState(
-    "Discussed Q4 objectives focusing on product launches and market expansion. Team agreed on three priority initiatives: mobile app redesign, customer retention program, and partnership development in APAC region.",
+    'Discussed Q4 objectives focusing on product launches and market expansion. Team agreed on three priority initiatives: mobile app redesign, customer retention program, and partnership development in APAC region.',
   )
   const [isEditingSummary, setIsEditingSummary] = useState(false)
   const [editedSummaryText, setEditedSummaryText] = useState(summaryText)
   const [showRegenerateOptions, setShowRegenerateOptions] = useState(false)
   const [showDownloadOptions, setShowDownloadOptions] = useState(false)
-  const [downloadFormat, setDownloadFormat] = useState<"pdf" | "txt" | "markdown">("pdf")
-  const [includeSections, setIncludeSections] = useState({
-    summary: true,
-    decisions: true,
-    actionItems: true,
-    transcript: false,
-  })
 
   const handleSaveSummary = () => {
     setSummaryText(editedSummaryText)
     setIsEditingSummary(false)
   }
 
-  const handleCancelSummary = () => {
-    setEditedSummaryText(summaryText)
-    setIsEditingSummary(false)
-  }
-
-  const handleRegenerateSummary = (style: string) => {
-    console.log("[v0] Regenerating summary with style:", style)
-    setShowRegenerateOptions(false)
-    // In production, this would trigger AI regeneration
-  }
-
-  const handleDownload = () => {
-    console.log("[v0] Downloading as:", downloadFormat, "with sections:", includeSections)
-    setShowDownloadOptions(false)
-    // In production, this would trigger the actual download
-  }
-
   return (
-    <div className="min-h-screen">
+    <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
       {/* Header */}
-      <div className="sticky top-0 z-10 border-b border-border bg-background/80 backdrop-blur-lg">
-        <div className="flex items-center justify-between px-6 py-4">
-          <Button variant="ghost" size="icon" onClick={() => onNavigate("home")}>
-            <ArrowLeft className="h-5 w-5" />
+      <View style={styles.header}>
+        <Button variant="ghost" size="icon" onPress={() => onNavigate('home')}>
+          <Ionicons name="arrow-back" size={20} color={Colors.foreground} />
+        </Button>
+        <View style={styles.headerButtons}>
+          <Button variant="ghost" size="icon" onPress={() => {}}>
+            <Ionicons name="share-outline" size={20} color={Colors.foreground} />
           </Button>
-          <div className="flex gap-2">
-            <Button variant="ghost" size="icon">
-              <Share2 className="h-5 w-5" />
+          <Button variant="ghost" size="icon" onPress={() => setShowDownloadOptions(true)}>
+            <Ionicons name="download-outline" size={20} color={Colors.foreground} />
             </Button>
-            <Button variant="ghost" size="icon" onClick={() => setShowDownloadOptions(true)}>
-              <Download className="h-5 w-5" />
-            </Button>
-          </div>
-        </div>
-      </div>
+        </View>
+      </View>
 
       {/* Content */}
-      <div className="space-y-6 px-6 py-6">
+      <View style={styles.content}>
         {/* Meeting Title */}
-        <div>
+        <View style={styles.titleSection}>
           {isEditingTitle ? (
-            <div className="flex items-center gap-2">
+            <View style={styles.titleEditContainer}>
               <Input
                 value={meetingTitle}
-                onChange={(e) => setMeetingTitle(e.target.value)}
-                className="text-3xl font-medium"
+                onChangeText={setMeetingTitle}
+                style={styles.titleInput}
                 autoFocus
               />
-              <Button size="icon" variant="ghost" onClick={() => setIsEditingTitle(false)}>
-                <Save className="h-4 w-4" />
+              <Button size="icon" variant="ghost" onPress={() => setIsEditingTitle(false)}>
+                <Ionicons name="checkmark" size={16} color={Colors.foreground} />
               </Button>
-            </div>
+            </View>
           ) : (
-            <h1
-              className="mb-2 cursor-pointer text-3xl font-medium hover:text-muted-foreground"
-              onClick={() => setIsEditingTitle(true)}
-            >
-              {meetingTitle}
-            </h1>
+            <TouchableOpacity onPress={() => setIsEditingTitle(true)}>
+              <Text style={styles.title}>{meetingTitle}</Text>
+            </TouchableOpacity>
           )}
-          <p className="text-sm text-muted-foreground">45 minutes • Today at 2:30 PM</p>
-        </div>
+          <Text style={styles.subtitle}>45 minutes • Today at 2:30 PM</Text>
+        </View>
 
         {/* Summary Section */}
-        <Card className="p-5">
-          <div className="mb-3 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="rounded-full bg-accent/10 p-1.5">
-                <CheckCircle2 className="h-4 w-4 text-accent" />
-              </div>
-              <h2 className="font-medium uppercase tracking-wide text-muted-foreground text-xs">Summary</h2>
-            </div>
-            <div className="flex gap-1">
+        <Card style={styles.card}>
+          <View style={styles.cardHeader}>
+            <View style={styles.cardHeaderLeft}>
+              <View style={styles.iconBadge}>
+                <Ionicons name="checkmark-circle" size={16} color={Colors.accent} />
+              </View>
+              <Text style={styles.sectionLabel}>Summary</Text>
+            </View>
+            <View style={styles.cardHeaderButtons}>
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-7 px-2"
-                onClick={() => {
+                onPress={() => {
                   setEditedSummaryText(summaryText)
                   setIsEditingSummary(true)
                 }}
               >
-                <Edit3 className="h-3.5 w-3.5" />
+                <Ionicons name="pencil" size={14} color={Colors.foreground} />
               </Button>
-              <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => setShowRegenerateOptions(true)}>
-                <RefreshCw className="h-3.5 w-3.5" />
+              <Button variant="ghost" size="sm" onPress={() => setShowRegenerateOptions(true)}>
+                <Ionicons name="refresh" size={14} color={Colors.foreground} />
               </Button>
-            </div>
-          </div>
+            </View>
+          </View>
 
           {isEditingSummary ? (
-            <div className="space-y-3">
+            <View style={styles.editContainer}>
               <Textarea
                 value={editedSummaryText}
-                onChange={(e) => setEditedSummaryText(e.target.value)}
-                className="min-h-[100px] leading-relaxed"
+                onChangeText={setEditedSummaryText}
+                numberOfLines={6}
+                style={styles.summaryTextarea}
                 autoFocus
               />
-              <div className="flex justify-end gap-2">
-                <Button size="sm" variant="ghost" onClick={handleCancelSummary}>
-                  <X className="mr-1 h-3 w-3" />
-                  Cancel
+              <View style={styles.editButtons}>
+                <Button size="sm" variant="outline" onPress={() => setIsEditingSummary(false)}>
+                  <Text>Cancel</Text>
                 </Button>
-                <Button size="sm" onClick={handleSaveSummary}>
-                  <Save className="mr-1 h-3 w-3" />
-                  Save
+                <Button size="sm" onPress={handleSaveSummary}>
+                  <Text>Save</Text>
                 </Button>
-              </div>
-            </div>
+              </View>
+            </View>
           ) : (
-            <p className="leading-relaxed text-foreground">{summaryText}</p>
+            <Text style={styles.summaryText}>{summaryText}</Text>
           )}
         </Card>
 
-        {/* Summary Section */}
-
         {/* Decisions Section */}
-        <Card className="p-5">
-          <div className="mb-4 flex items-center gap-2">
-            <div className="rounded-full bg-accent/10 p-1.5">
-              <CheckCircle2 className="h-4 w-4 text-accent" />
-            </div>
-            <h2 className="font-medium uppercase tracking-wide text-muted-foreground text-xs">Key Decisions</h2>
-          </div>
-          <ul className="space-y-3">
+        <Card style={styles.card}>
+          <View style={styles.cardHeader}>
+            <View style={styles.cardHeaderLeft}>
+              <View style={styles.iconBadge}>
+                <Ionicons name="checkmark-circle" size={16} color={Colors.accent} />
+              </View>
+              <Text style={styles.sectionLabel}>Key Decisions</Text>
+            </View>
+          </View>
+          <View style={styles.list}>
             <DecisionItem text="Allocate $200K budget for mobile redesign" />
             <DecisionItem text="Launch retention program by end of October" />
             <DecisionItem text="Prioritize APAC expansion over European markets" />
-          </ul>
+          </View>
         </Card>
 
         {/* Action Items Section */}
-        <Card className="p-5">
-          <div className="mb-4 flex items-center gap-2">
-            <div className="rounded-full bg-accent/10 p-1.5">
-              <CheckCircle2 className="h-4 w-4 text-accent" />
-            </div>
-            <h2 className="font-medium uppercase tracking-wide text-muted-foreground text-xs">Action Items</h2>
-          </div>
-          <div className="space-y-4">
+        <Card style={styles.card}>
+          <View style={styles.cardHeader}>
+            <View style={styles.cardHeaderLeft}>
+              <View style={styles.iconBadge}>
+                <Ionicons name="checkmark-circle" size={16} color={Colors.accent} />
+              </View>
+              <Text style={styles.sectionLabel}>Action Items</Text>
+            </View>
+          </View>
+          <View style={styles.actionItems}>
             <ActionItem label="Schedule design review with product team" assignee="Sarah" dueDate="Oct 15" />
             <ActionItem label="Draft retention program proposal" assignee="Mike" dueDate="Oct 18" />
             <ActionItem label="Research APAC partnership opportunities" assignee="Jessica" dueDate="Oct 20" />
             <ActionItem label="Prepare budget allocation document" assignee="Tom" dueDate="Oct 22" />
-          </div>
+          </View>
         </Card>
+      </View>
 
-        {/* Bottom Spacing */}
-        <div className="h-8" />
-      </div>
-
-      {showRegenerateOptions && (
-        <div
-          className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm"
-          onClick={() => setShowRegenerateOptions(false)}
+      {/* Modals */}
+      <Modal visible={showRegenerateOptions} transparent animationType="slide">
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowRegenerateOptions(false)}
         >
-          <div
-            className="fixed bottom-0 left-0 right-0 mx-auto max-w-md rounded-t-2xl border-t border-l border-r border-border bg-background p-6"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-lg font-medium">Regenerate Summary</h3>
-              <Button variant="ghost" size="icon" onClick={() => setShowRegenerateOptions(false)}>
-                <X className="h-4 w-4" />
+          <View style={styles.modalContent} onStartShouldSetResponder={() => true}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Regenerate Summary</Text>
+              <Button variant="ghost" size="icon" onPress={() => setShowRegenerateOptions(false)}>
+                <Ionicons name="close" size={20} color={Colors.foreground} />
               </Button>
-            </div>
-            <p className="mb-4 text-sm text-muted-foreground">
+            </View>
+            <Text style={styles.modalDescription}>
               Choose a style to regenerate the AI summary. Your manual edits will be preserved.
-            </p>
-            <div className="space-y-2">
+            </Text>
+            <View style={styles.modalOptions}>
               <Button
-                variant="outline"
-                className="w-full justify-start bg-transparent"
-                onClick={() => handleRegenerateSummary("action-focused")}
+                style={styles.modalOption}
+                onPress={() => {
+                  // In a real app, this would trigger AI regeneration
+                  console.log('Regenerating with action-focused style')
+                  setShowRegenerateOptions(false)
+                }}
               >
-                <CheckCircle2 className="mr-2 h-4 w-4" />
-                Action-focused
+                <Text>Action-focused</Text>
               </Button>
               <Button
-                variant="outline"
-                className="w-full justify-start bg-transparent"
-                onClick={() => handleRegenerateSummary("detailed")}
+                style={styles.modalOption}
+                onPress={() => {
+                  // In a real app, this would trigger AI regeneration
+                  console.log('Regenerating with detailed style')
+                  setShowRegenerateOptions(false)
+                }}
               >
-                <FileText className="mr-2 h-4 w-4" />
-                Detailed
+                <Text>Detailed</Text>
               </Button>
               <Button
-                variant="outline"
-                className="w-full justify-start bg-transparent"
-                onClick={() => handleRegenerateSummary("brief")}
+                style={styles.modalOption}
+                onPress={() => {
+                  // In a real app, this would trigger AI regeneration
+                  console.log('Regenerating with brief style')
+                  setShowRegenerateOptions(false)
+                }}
               >
-                <File className="mr-2 h-4 w-4" />
-                Brief
+                <Text>Brief</Text>
               </Button>
-            </div>
-          </div>
-        </div>
-      )}
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
-      {showDownloadOptions && (
-        <div
-          className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm"
-          onClick={() => setShowDownloadOptions(false)}
+      <Modal visible={showDownloadOptions} transparent animationType="slide">
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowDownloadOptions(false)}
         >
-          <div
-            className="fixed bottom-0 left-0 right-0 mx-auto max-w-md rounded-t-2xl border-t border-l border-r border-border bg-background p-6"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-lg font-medium">Download Meeting</h3>
-              <Button variant="ghost" size="icon" onClick={() => setShowDownloadOptions(false)}>
-                <X className="h-4 w-4" />
+          <View style={styles.modalContent} onStartShouldSetResponder={() => true}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Download Meeting</Text>
+              <Button variant="ghost" size="icon" onPress={() => setShowDownloadOptions(false)}>
+                <Ionicons name="close" size={20} color={Colors.foreground} />
               </Button>
-            </div>
-
-            <div className="mb-4 space-y-3">
-              <p className="text-sm font-medium">Format</p>
-              <div className="grid grid-cols-3 gap-2">
-                <Button
-                  variant={downloadFormat === "pdf" ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setDownloadFormat("pdf")}
-                >
-                  PDF
-                </Button>
-                <Button
-                  variant={downloadFormat === "txt" ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setDownloadFormat("txt")}
-                >
-                  TXT
-                </Button>
-                <Button
-                  variant={downloadFormat === "markdown" ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setDownloadFormat("markdown")}
-                >
-                  Markdown
-                </Button>
-              </div>
-            </div>
-
-            <div className="mb-6 space-y-3">
-              <p className="text-sm font-medium">Include Sections</p>
-              <div className="space-y-2">
-                <label className="flex items-center gap-3">
-                  <Checkbox
-                    checked={includeSections.summary}
-                    onCheckedChange={(checked) =>
-                      setIncludeSections((prev) => ({ ...prev, summary: checked as boolean }))
-                    }
-                  />
-                  <span className="text-sm">Summary</span>
-                </label>
-                <label className="flex items-center gap-3">
-                  <Checkbox
-                    checked={includeSections.decisions}
-                    onCheckedChange={(checked) =>
-                      setIncludeSections((prev) => ({ ...prev, decisions: checked as boolean }))
-                    }
-                  />
-                  <span className="text-sm">Key Decisions</span>
-                </label>
-                <label className="flex items-center gap-3">
-                  <Checkbox
-                    checked={includeSections.actionItems}
-                    onCheckedChange={(checked) =>
-                      setIncludeSections((prev) => ({ ...prev, actionItems: checked as boolean }))
-                    }
-                  />
-                  <span className="text-sm">Action Items</span>
-                </label>
-                <label className="flex items-center gap-3">
-                  <Checkbox
-                    checked={includeSections.transcript}
-                    onCheckedChange={(checked) =>
-                      setIncludeSections((prev) => ({ ...prev, transcript: checked as boolean }))
-                    }
-                  />
-                  <span className="text-sm">Full Transcript</span>
-                </label>
-              </div>
-            </div>
-
-            <Button className="w-full" onClick={handleDownload}>
-              <Download className="mr-2 h-4 w-4" />
-              Download {downloadFormat.toUpperCase()}
+            </View>
+            <Button style={styles.downloadButton} onPress={() => setShowDownloadOptions(false)}>
+              <Text style={styles.downloadButtonText}>Download PDF</Text>
             </Button>
-          </div>
-        </div>
-      )}
-    </div>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+    </ScrollView>
   )
 }
 
 function DecisionItem({ text }: { text: string }) {
   return (
-    <li className="flex items-start gap-3">
-      <div className="mt-0.5 h-1.5 w-1.5 rounded-full bg-accent" />
-      <span className="flex-1 leading-relaxed">{text}</span>
-    </li>
+    <View style={styles.decisionItem}>
+      <View style={styles.decisionDot} />
+      <Text style={styles.decisionText}>{text}</Text>
+    </View>
   )
 }
 
 function ActionItem({ label, assignee, dueDate }: { label: string; assignee: string; dueDate?: string }) {
-  const [isEditing, setIsEditing] = useState(false)
   const [isChecked, setIsChecked] = useState(false)
-  const [text, setText] = useState(label)
-  const [editedText, setEditedText] = useState(label)
-  const [editedDueDate, setEditedDueDate] = useState(dueDate || "")
-
-  const handleSave = () => {
-    setText(editedText)
-    setIsEditing(false)
-  }
-
-  const handleCancel = () => {
-    setEditedText(text)
-    setEditedDueDate(dueDate || "")
-    setIsEditing(false)
-  }
-
-  if (isEditing) {
-    return (
-      <div className="space-y-3 rounded-lg border border-accent/30 bg-accent/5 p-3">
-        <Input
-          value={editedText}
-          onChange={(e) => setEditedText(e.target.value)}
-          className="text-sm"
-          placeholder="Action item..."
-          autoFocus
-        />
-        <div className="flex items-center gap-2">
-          <Calendar className="h-4 w-4 text-muted-foreground" />
-          <Input
-            value={editedDueDate}
-            onChange={(e) => setEditedDueDate(e.target.value)}
-            className="h-8 text-xs"
-            placeholder="Due date (optional)"
-          />
-        </div>
-        <div className="flex justify-end gap-2">
-          <Button size="sm" variant="ghost" onClick={handleCancel} className="h-7 text-xs">
-            <X className="mr-1 h-3 w-3" />
-            Cancel
-          </Button>
-          <Button size="sm" onClick={handleSave} className="h-7 text-xs">
-            <Save className="mr-1 h-3 w-3" />
-            Save
-          </Button>
-        </div>
-      </div>
-    )
-  }
 
   return (
-    <div className="flex items-start gap-3">
-      <Checkbox
-        className="mt-0.5 shrink-0"
-        checked={isChecked}
-        onCheckedChange={(checked) => setIsChecked(checked === true)}
-      />
-      <div className="flex-1 cursor-pointer" onClick={() => setIsEditing(true)}>
-        <p className={`leading-relaxed ${isChecked ? "text-muted-foreground line-through" : ""}`}>{text}</p>
-        <div className="mt-1 flex gap-3 text-xs text-muted-foreground">
-          <span>{assignee}</span>
+    <View style={styles.actionItem}>
+      <Checkbox checked={isChecked} onCheckedChange={setIsChecked} />
+      <View style={styles.actionItemContent}>
+        <Text style={[styles.actionItemText, isChecked && styles.actionItemTextChecked]}>{label}</Text>
+        <View style={styles.actionItemMeta}>
+          <Text style={styles.actionItemMetaText}>{assignee}</Text>
           {dueDate && (
             <>
-              <span>•</span>
-              <span>Due {dueDate}</span>
+              <Text style={styles.actionItemMetaText}>•</Text>
+              <Text style={styles.actionItemMetaText}>Due {dueDate}</Text>
             </>
           )}
-        </div>
-      </div>
-    </div>
+        </View>
+      </View>
+    </View>
   )
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: Colors.background,
+  },
+  contentContainer: {
+    paddingBottom: 32,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  headerButtons: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  content: {
+    paddingHorizontal: 24,
+    paddingVertical: 24,
+    gap: 24,
+  },
+  titleSection: {
+    gap: 8,
+  },
+  title: {
+    fontSize: 30,
+    fontWeight: '500',
+    color: Colors.foreground,
+  },
+  subtitle: {
+    fontSize: 14,
+    color: Colors.mutedForeground,
+  },
+  titleEditContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  titleInput: {
+    flex: 1,
+    fontSize: 30,
+    fontWeight: '500',
+  },
+  card: {
+    padding: 20,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  cardHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  iconBadge: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: Colors.accent + '1A',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sectionLabel: {
+    fontSize: 12,
+    fontWeight: '500',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    color: Colors.mutedForeground,
+  },
+  cardHeaderButtons: {
+    flexDirection: 'row',
+    gap: 4,
+  },
+  editContainer: {
+    gap: 12,
+  },
+  summaryTextarea: {
+    minHeight: 100,
+  },
+  editButtons: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 8,
+  },
+  summaryText: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: Colors.foreground,
+  },
+  list: {
+    gap: 12,
+  },
+  decisionItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  decisionDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: Colors.accent,
+    marginTop: 6,
+  },
+  decisionText: {
+    flex: 1,
+    fontSize: 14,
+    lineHeight: 20,
+    color: Colors.foreground,
+  },
+  actionItems: {
+    gap: 16,
+  },
+  actionItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  actionItemContent: {
+    flex: 1,
+  },
+  actionItemText: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: Colors.foreground,
+  },
+  actionItemTextChecked: {
+    textDecorationLine: 'line-through',
+    color: Colors.mutedForeground,
+  },
+  actionItemMeta: {
+    flexDirection: 'row',
+    gap: 6,
+    marginTop: 4,
+  },
+  actionItemMetaText: {
+    fontSize: 12,
+    color: Colors.mutedForeground,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: Colors.background,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    padding: 24,
+    gap: 16,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '500',
+    color: Colors.foreground,
+  },
+  modalDescription: {
+    fontSize: 14,
+    color: Colors.mutedForeground,
+  },
+  modalOptions: {
+    gap: 8,
+  },
+  modalOption: {
+    width: '100%',
+  },
+  downloadButton: {
+    width: '100%',
+  },
+  downloadButtonText: {
+    fontSize: 16,
+    fontWeight: '500',
+  },
+})

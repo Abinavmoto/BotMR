@@ -1,66 +1,122 @@
-'use client'
+import React, { useState } from 'react'
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native'
+import { Colors } from '@/constants/Colors'
 
-import * as React from 'react'
-import * as TabsPrimitive from '@radix-ui/react-tabs'
+interface TabsProps {
+  value?: string
+  onValueChange?: (value: string) => void
+  children?: React.ReactNode
+  className?: string
+}
 
-import { cn } from '@/lib/utils'
+interface TabsListProps {
+  children?: React.ReactNode
+  className?: string
+}
 
-function Tabs({
-  className,
-  ...props
-}: React.ComponentProps<typeof TabsPrimitive.Root>) {
+interface TabsTriggerProps {
+  value: string
+  children?: React.ReactNode
+  className?: string
+}
+
+interface TabsContentProps {
+  value: string
+  children?: React.ReactNode
+  className?: string
+}
+
+export function Tabs({ value, onValueChange, children }: TabsProps) {
+  const [internalValue, setInternalValue] = useState(value || '')
+  const isControlled = value !== undefined
+  const currentValue = isControlled ? value : internalValue
+
+  const handleValueChange = (newValue: string) => {
+    if (!isControlled) {
+      setInternalValue(newValue)
+    }
+    onValueChange?.(newValue)
+  }
+
   return (
-    <TabsPrimitive.Root
-      data-slot="tabs"
-      className={cn('flex flex-col gap-2', className)}
-      {...props}
-    />
+    <View style={styles.container}>
+      {React.Children.map(children, (child) => {
+        if (React.isValidElement(child)) {
+          return React.cloneElement(child as any, {
+            currentValue,
+            onValueChange: handleValueChange,
+          })
+        }
+        return child
+      })}
+    </View>
   )
 }
 
-function TabsList({
-  className,
-  ...props
-}: React.ComponentProps<typeof TabsPrimitive.List>) {
+export function TabsList({ children, currentValue, onValueChange }: TabsListProps & { currentValue?: string; onValueChange?: (value: string) => void }) {
   return (
-    <TabsPrimitive.List
-      data-slot="tabs-list"
-      className={cn(
-        'bg-muted text-muted-foreground inline-flex h-9 w-fit items-center justify-center rounded-lg p-[3px]',
-        className,
-      )}
-      {...props}
-    />
+    <View style={styles.list}>
+      {React.Children.map(children, (child) => {
+        if (React.isValidElement(child) && child.props.value !== undefined) {
+          return React.cloneElement(child as any, {
+            isActive: currentValue === child.props.value,
+            onPress: () => onValueChange?.(child.props.value),
+          })
+        }
+        return child
+      })}
+    </View>
   )
 }
 
-function TabsTrigger({
-  className,
-  ...props
-}: React.ComponentProps<typeof TabsPrimitive.Trigger>) {
+export function TabsTrigger({ value, children, isActive, onPress }: TabsTriggerProps & { isActive?: boolean; onPress?: () => void }) {
   return (
-    <TabsPrimitive.Trigger
-      data-slot="tabs-trigger"
-      className={cn(
-        "data-[state=active]:bg-background dark:data-[state=active]:text-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:outline-ring dark:data-[state=active]:border-input dark:data-[state=active]:bg-input/30 text-foreground dark:text-muted-foreground inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 rounded-md border border-transparent px-2 py-1 text-sm font-medium whitespace-nowrap transition-[color,box-shadow] focus-visible:ring-[3px] focus-visible:outline-1 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:shadow-sm [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
-        className,
-      )}
-      {...props}
-    />
+    <TouchableOpacity
+      style={[styles.trigger, isActive && styles.triggerActive]}
+      onPress={onPress}
+      activeOpacity={0.7}
+    >
+      <Text style={[styles.triggerText, isActive && styles.triggerTextActive]}>{children}</Text>
+    </TouchableOpacity>
   )
 }
 
-function TabsContent({
-  className,
-  ...props
-}: React.ComponentProps<typeof TabsPrimitive.Content>) {
-  return (
-    <TabsPrimitive.Content
-      data-slot="tabs-content"
-      className={cn('flex-1 outline-none', className)}
-      {...props}
-    />
-  )
+export function TabsContent({ value, children, currentValue }: TabsContentProps & { currentValue?: string }) {
+  if (currentValue !== value) return null
+  return <View style={styles.content}>{children}</View>
 }
 
-export { Tabs, TabsList, TabsTrigger, TabsContent }
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  list: {
+    flexDirection: 'row',
+    backgroundColor: Colors.muted,
+    borderRadius: 8,
+    padding: 3,
+    gap: 3,
+  },
+  trigger: {
+    flex: 1,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  triggerActive: {
+    backgroundColor: Colors.background,
+  },
+  triggerText: {
+    fontSize: 12,
+    color: Colors.mutedForeground,
+    fontWeight: '500',
+  },
+  triggerTextActive: {
+    color: Colors.foreground,
+  },
+  content: {
+    marginTop: 16,
+  },
+})

@@ -1,83 +1,199 @@
-"use client"
+import React from 'react'
+import { View, Text, StyleSheet, ScrollView } from 'react-native'
+import { Ionicons } from '@expo/vector-icons'
+import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
+import { Colors } from '@/constants/Colors'
 
-import { X, Check, Zap } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
+import { NavigationHandler } from '@/src/types/navigation'
 
 interface PaywallScreenProps {
-  onNavigate: (screen: "home" | "recording" | "processing" | "summary" | "paywall") => void
+  onNavigate: NavigationHandler
 }
 
 export function PaywallScreen({ onNavigate }: PaywallScreenProps) {
   return (
-    <div className="flex min-h-screen flex-col px-6 py-8">
+    <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
       {/* Header */}
-      <div className="mb-8 flex justify-end">
-        <Button variant="ghost" size="icon" onClick={() => onNavigate("home")}>
-          <X className="h-5 w-5" />
+      <View style={styles.header}>
+        <Button variant="ghost" size="icon" onPress={() => onNavigate('home')}>
+          <Ionicons name="close" size={20} color={Colors.foreground} />
         </Button>
-      </div>
+      </View>
 
       {/* Content */}
-      <div className="flex flex-1 flex-col justify-between">
-        <div className="space-y-8">
+      <View style={styles.content}>
+        <View style={styles.topSection}>
           {/* Icon */}
-          <div className="flex justify-center">
-            <div className="rounded-full bg-accent/10 p-6">
-              <Zap className="h-12 w-12 text-accent" />
-            </div>
-          </div>
+          <View style={styles.iconContainer}>
+            <View style={styles.iconCircle}>
+              <Ionicons name="flash" size={48} color={Colors.accent} />
+            </View>
+          </View>
 
           {/* Title */}
-          <div className="space-y-3 text-center">
-            <h1 className="text-3xl font-medium text-balance">Unlock Unlimited Meetings</h1>
-            <p className="text-muted-foreground text-balance">Record as many meetings as you need with BotMR Pro</p>
-          </div>
+          <View style={styles.titleContainer}>
+            <Text style={styles.title}>Unlock Unlimited Meetings</Text>
+            <Text style={styles.subtitle}>Record as many meetings as you need with BotMR Pro</Text>
+          </View>
 
           {/* Features */}
-          <div className="space-y-4">
+          <View style={styles.featuresContainer}>
             <Feature text="Unlimited meeting recordings" />
             <Feature text="Advanced AI summaries" />
             <Feature text="Priority processing" />
             <Feature text="Export to all formats" />
             <Feature text="Team collaboration" />
-          </div>
-        </div>
+          </View>
+        </View>
 
         {/* Pricing Card */}
-        <div className="space-y-4">
-          <Card className="border-accent/20 bg-card p-6">
-            <div className="mb-4 text-center">
-              <div className="mb-1 flex items-baseline justify-center gap-1">
-                <span className="text-4xl font-medium">$9.99</span>
-                <span className="text-muted-foreground">/month</span>
-              </div>
-              <p className="text-sm text-muted-foreground">Cancel anytime</p>
-            </div>
+        <View style={styles.pricingSection}>
+          <Card style={styles.pricingCard}>
+            <View style={styles.pricingHeader}>
+              <View style={styles.priceContainer}>
+                <Text style={styles.price}>$9.99</Text>
+                <Text style={styles.priceUnit}>/month</Text>
+              </View>
+              <Text style={styles.cancelText}>Cancel anytime</Text>
+            </View>
 
             <Button
               size="lg"
-              className="w-full bg-accent text-accent-foreground hover:bg-accent/90"
-              onClick={() => onNavigate("home")}
+              onPress={() => onNavigate('home')}
+              style={styles.subscribeButton}
             >
-              Start Free Trial
+              <Text style={styles.subscribeButtonText}>Start Free Trial</Text>
             </Button>
           </Card>
 
-          <p className="text-center text-xs text-muted-foreground">7-day free trial, then $9.99/month</p>
-        </div>
-      </div>
-    </div>
+          <Text style={styles.trialText}>7-day free trial, then $9.99/month</Text>
+        </View>
+      </View>
+    </ScrollView>
   )
 }
 
 function Feature({ text }: { text: string }) {
   return (
-    <div className="flex items-center gap-3">
-      <div className="flex h-6 w-6 items-center justify-center rounded-full bg-accent/10">
-        <Check className="h-4 w-4 text-accent" />
-      </div>
-      <span>{text}</span>
-    </div>
+    <View style={styles.feature}>
+      <View style={styles.featureIcon}>
+        <Ionicons name="checkmark" size={16} color={Colors.accent} />
+      </View>
+      <Text style={styles.featureText}>{text}</Text>
+    </View>
   )
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: Colors.background,
+  },
+  contentContainer: {
+    paddingHorizontal: 24,
+    paddingVertical: 32,
+  },
+  header: {
+    marginBottom: 32,
+    alignItems: 'flex-end',
+  },
+  content: {
+    flex: 1,
+    justifyContent: 'space-between',
+  },
+  topSection: {
+    gap: 32,
+  },
+  iconContainer: {
+    alignItems: 'center',
+  },
+  iconCircle: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: Colors.accent + '1A',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  titleContainer: {
+    gap: 12,
+    alignItems: 'center',
+  },
+  title: {
+    fontSize: 30,
+    fontWeight: '500',
+    color: Colors.foreground,
+    textAlign: 'center',
+  },
+  subtitle: {
+    fontSize: 14,
+    color: Colors.mutedForeground,
+    textAlign: 'center',
+  },
+  featuresContainer: {
+    gap: 16,
+  },
+  feature: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  featureIcon: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: Colors.accent + '1A',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  featureText: {
+    fontSize: 16,
+    color: Colors.foreground,
+  },
+  pricingSection: {
+    gap: 16,
+  },
+  pricingCard: {
+    borderColor: Colors.accent + '33',
+    backgroundColor: Colors.card,
+    padding: 24,
+  },
+  pricingHeader: {
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  priceContainer: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 4,
+    marginBottom: 4,
+  },
+  price: {
+    fontSize: 36,
+    fontWeight: '500',
+    color: Colors.foreground,
+  },
+  priceUnit: {
+    fontSize: 16,
+    color: Colors.mutedForeground,
+  },
+  cancelText: {
+    fontSize: 14,
+    color: Colors.mutedForeground,
+  },
+  subscribeButton: {
+    width: '100%',
+    backgroundColor: Colors.accent,
+  },
+  subscribeButtonText: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: Colors.accentForeground,
+  },
+  trialText: {
+    fontSize: 12,
+    color: Colors.mutedForeground,
+    textAlign: 'center',
+  },
+})

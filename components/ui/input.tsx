@@ -1,21 +1,54 @@
-import * as React from 'react'
+import React from 'react'
+import { TextInput, StyleSheet, ViewStyle, TextStyle } from 'react-native'
+import { Colors } from '@/constants/Colors'
 
-import { cn } from '@/lib/utils'
+interface InputProps {
+  value?: string
+  onChangeText?: (text: string) => void
+  placeholder?: string
+  style?: ViewStyle | TextStyle
+  autoFocus?: boolean
+  multiline?: boolean
+  numberOfLines?: number
+  editable?: boolean
+}
 
-function Input({ className, type, ...props }: React.ComponentProps<'input'>) {
+export function Input({
+  value,
+  onChangeText,
+  placeholder,
+  style,
+  autoFocus,
+  multiline,
+  numberOfLines,
+  editable = true,
+}: InputProps) {
   return (
-    <input
-      type={type}
-      data-slot="input"
-      className={cn(
-        'file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 border-input h-9 w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm',
-        'focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]',
-        'aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive',
-        className,
-      )}
-      {...props}
+    <TextInput
+      style={[styles.input, style]}
+      value={value}
+      onChangeText={onChangeText}
+      placeholder={placeholder}
+      placeholderTextColor={Colors.mutedForeground}
+      autoFocus={autoFocus}
+      multiline={multiline}
+      numberOfLines={numberOfLines}
+      editable={editable}
     />
   )
 }
 
-export { Input }
+const styles = StyleSheet.create({
+  input: {
+    height: 36,
+    width: '100%',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: Colors.input,
+    backgroundColor: 'transparent',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 14,
+    color: Colors.foreground,
+  },
+})

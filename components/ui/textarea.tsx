@@ -1,18 +1,53 @@
-import * as React from 'react'
+import React from 'react'
+import { TextInput, StyleSheet, ViewStyle, TextStyle } from 'react-native'
+import { Colors } from '@/constants/Colors'
 
-import { cn } from '@/lib/utils'
+interface TextareaProps {
+  value?: string
+  onChangeText?: (text: string) => void
+  placeholder?: string
+  style?: ViewStyle | TextStyle
+  autoFocus?: boolean
+  numberOfLines?: number
+  editable?: boolean
+}
 
-function Textarea({ className, ...props }: React.ComponentProps<'textarea'>) {
+export function Textarea({
+  value,
+  onChangeText,
+  placeholder,
+  style,
+  autoFocus,
+  numberOfLines = 4,
+  editable = true,
+}: TextareaProps) {
   return (
-    <textarea
-      data-slot="textarea"
-      className={cn(
-        'border-input placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive dark:bg-input/30 flex field-sizing-content min-h-16 w-full rounded-md border bg-transparent px-3 py-2 text-base shadow-xs transition-[color,box-shadow] outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50 md:text-sm',
-        className,
-      )}
-      {...props}
+    <TextInput
+      style={[styles.textarea, style]}
+      value={value}
+      onChangeText={onChangeText}
+      placeholder={placeholder}
+      placeholderTextColor={Colors.mutedForeground}
+      autoFocus={autoFocus}
+      multiline
+      numberOfLines={numberOfLines}
+      textAlignVertical="top"
+      editable={editable}
     />
   )
 }
 
-export { Textarea }
+const styles = StyleSheet.create({
+  textarea: {
+    minHeight: 64,
+    width: '100%',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: Colors.input,
+    backgroundColor: 'transparent',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 14,
+    color: Colors.foreground,
+  },
+})

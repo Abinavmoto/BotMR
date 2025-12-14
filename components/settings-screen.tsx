@@ -1,483 +1,553 @@
-"use client"
+import React, { useState } from 'react'
+import { View, Text, StyleSheet, ScrollView, Modal, TouchableOpacity } from 'react-native'
+import { Ionicons } from '@expo/vector-icons'
+import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
+import { Switch } from '@/components/ui/switch'
+import { Progress } from '@/components/ui/progress'
+import { Colors } from '@/constants/Colors'
 
-import { useState } from "react"
-import { ArrowLeft, Trash2, AlertTriangle, CalendarDays, CheckCircle2, X } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
-import { Switch } from "@/components/ui/switch"
-import { Progress } from "@/components/ui/progress"
+import { NavigationHandler } from '@/src/types/navigation'
 
 interface SettingsScreenProps {
-  onNavigate: (
-    screen: "home" | "recording" | "processing" | "summary" | "paywall" | "settings" | "all-meetings",
-  ) => void
+  onNavigate: NavigationHandler
 }
 
 export function SettingsScreen({ onNavigate }: SettingsScreenProps) {
   const [showDeleteLocalConfirm, setShowDeleteLocalConfirm] = useState(false)
   const [showDeleteCloudConfirm, setShowDeleteCloudConfirm] = useState(false)
-  const [showAudioQualitySheet, setShowAudioQualitySheet] = useState(false)
-  const [showProcessingModeSheet, setShowProcessingModeSheet] = useState(false)
-  const [showSummaryStyleSheet, setShowSummaryStyleSheet] = useState(false)
-  const [showCalendarSheet, setShowCalendarSheet] = useState(false)
-
-  const [audioQuality, setAudioQuality] = useState<"high" | "medium" | "low">("high")
-  const [processingMode, setProcessingMode] = useState<"cloud" | "hybrid">("cloud")
-  const [summaryStyle, setSummaryStyle] = useState<"action-focused" | "detailed" | "brief">("action-focused")
+  const [audioQuality, setAudioQuality] = useState<'high' | 'medium' | 'low'>('high')
+  const [processingMode, setProcessingMode] = useState<'cloud' | 'hybrid'>('cloud')
+  const [summaryStyle, setSummaryStyle] = useState<'action-focused' | 'detailed' | 'brief'>('action-focused')
   const [calendarSync, setCalendarSync] = useState(false)
+  const [autoUpload, setAutoUpload] = useState(true)
+  const [showAudioQualityModal, setShowAudioQualityModal] = useState(false)
+  const [showProcessingModeModal, setShowProcessingModeModal] = useState(false)
+  const [showSummaryStyleModal, setShowSummaryStyleModal] = useState(false)
 
   const isOnline = true
-  const currentPlan = "Free"
+  const currentPlan = 'Free'
   const meetingsUsed = 8
   const meetingsLimit = 10
   const storageUsed = 65
 
   return (
-    <div className="min-h-screen">
+    <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
       {/* Header */}
-      <div className="sticky top-0 z-10 border-b border-border bg-background/80 backdrop-blur-lg">
-        <div className="flex items-center justify-between px-6 py-4">
-          <Button variant="ghost" size="icon" onClick={() => onNavigate("home")}>
-            <ArrowLeft className="h-5 w-5" />
+      <View style={styles.header}>
+        <Button variant="ghost" size="icon" onPress={() => onNavigate('home')}>
+          <Ionicons name="arrow-back" size={20} color={Colors.foreground} />
           </Button>
-          <h1 className="text-lg font-medium">Settings</h1>
-          <div className="w-10" />
-        </div>
-      </div>
+        <Text style={styles.headerTitle}>Settings</Text>
+        <View style={styles.headerSpacer} />
+      </View>
 
       {/* Content */}
-      <div className="space-y-6 px-6 py-6">
+      <View style={styles.content}>
         {/* Recording Section */}
-        <div className="space-y-3">
-          <h2 className="text-sm font-medium uppercase tracking-wide text-muted-foreground">Recording</h2>
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Recording</Text>
 
-          <Card className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="font-medium">Audio Quality</p>
-                <p className="text-sm text-muted-foreground capitalize">{audioQuality}</p>
-              </div>
-              <Button variant="ghost" size="sm" onClick={() => setShowAudioQualitySheet(true)}>
-                Change
+          <Card style={styles.settingCard}>
+            <View style={styles.settingRow}>
+              <View style={styles.settingInfo}>
+                <Text style={styles.settingLabel}>Audio Quality</Text>
+                <Text style={styles.settingValue}>{audioQuality}</Text>
+              </View>
+              <Button size="sm" onPress={() => setShowAudioQualityModal(true)}>
+                <Text>Change</Text>
               </Button>
-            </div>
+            </View>
           </Card>
 
-          <Card className="p-4">
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <p className="font-medium">Local Storage</p>
-                <p className="text-sm text-muted-foreground">{storageUsed}% used</p>
-              </div>
-              <Progress value={storageUsed} className="h-2" />
-              <p className="text-xs text-muted-foreground">2.1 GB of 3.2 GB</p>
-            </div>
+          <Card style={styles.settingCard}>
+            <View style={styles.storageContainer}>
+              <View style={styles.settingRow}>
+                <Text style={styles.settingLabel}>Local Storage</Text>
+                <Text style={styles.settingValue}>{storageUsed}% used</Text>
+              </View>
+              <Progress value={storageUsed} />
+              <Text style={styles.storageText}>2.1 GB of 3.2 GB</Text>
+            </View>
           </Card>
 
-          <Card className="p-4">
-            <div className="flex items-center justify-between">
-              <div className="flex-1">
-                <p className="font-medium">Auto-upload when online</p>
-                <p className="text-sm text-muted-foreground">Recordings sync automatically to cloud</p>
-              </div>
-              <Switch defaultChecked className="shrink-0" />
-            </div>
+          <Card style={styles.settingCard}>
+            <View style={styles.settingRow}>
+              <View style={styles.settingInfo}>
+                <Text style={styles.settingLabel}>Auto-upload when online</Text>
+                <Text style={styles.settingDescription}>Recordings sync automatically to cloud</Text>
+              </View>
+              <Switch value={autoUpload} onValueChange={setAutoUpload} />
+            </View>
           </Card>
-        </div>
+        </View>
 
         {/* AI & Processing Section */}
-        <div className="space-y-3">
-          <h2 className="text-sm font-medium uppercase tracking-wide text-muted-foreground">AI & Processing</h2>
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>AI & Processing</Text>
 
-          <Card className="p-4">
-            <div className="flex items-center justify-between">
-              <div className="flex-1">
-                <p className="font-medium">Processing Mode</p>
-                <p className="text-sm text-muted-foreground capitalize">{processingMode}</p>
-              </div>
-              <Button variant="ghost" size="sm" className="shrink-0" onClick={() => setShowProcessingModeSheet(true)}>
-                Change
+          <Card style={styles.settingCard}>
+            <View style={styles.settingRow}>
+              <View style={styles.settingInfo}>
+                <Text style={styles.settingLabel}>Processing Mode</Text>
+                <Text style={styles.settingValue}>{processingMode}</Text>
+              </View>
+              <Button size="sm" onPress={() => setShowProcessingModeModal(true)}>
+                <Text>Change</Text>
               </Button>
-            </div>
+            </View>
           </Card>
 
-          <Card className="border-accent/30 bg-accent/5 p-4">
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              <span className="font-medium text-foreground">Cloud mode:</span> Fast, accurate AI processing on our
-              servers. <span className="font-medium text-foreground">Hybrid mode:</span> Basic transcription locally,
-              summary in cloud.
-            </p>
+          <Card style={styles.infoCard}>
+            <Text style={styles.infoText}>
+              <Text style={styles.infoBold}>Cloud mode:</Text> Fast, accurate AI processing on our servers.{' '}
+              <Text style={styles.infoBold}>Hybrid mode:</Text> Basic transcription locally, summary in cloud.
+            </Text>
           </Card>
 
-          <Card className="p-4">
-            <div className="flex items-center justify-between">
-              <div className="flex-1">
-                <p className="font-medium">Summary Style</p>
-                <p className="text-sm text-muted-foreground capitalize">{summaryStyle.replace("-", " ")}</p>
-              </div>
-              <Button variant="ghost" size="sm" className="shrink-0" onClick={() => setShowSummaryStyleSheet(true)}>
-                Change
+          <Card style={styles.settingCard}>
+            <View style={styles.settingRow}>
+              <View style={styles.settingInfo}>
+                <Text style={styles.settingLabel}>Summary Style</Text>
+                <Text style={styles.settingValue}>{summaryStyle.replace('-', ' ')}</Text>
+              </View>
+              <Button size="sm" onPress={() => setShowSummaryStyleModal(true)}>
+                <Text>Change</Text>
               </Button>
-            </div>
+            </View>
           </Card>
 
-          <Card className="p-4">
-            <div className="flex items-center justify-between">
-              <div className="flex-1">
-                <p className="font-medium">Calendar Integration</p>
-                <p className="text-sm text-muted-foreground">
-                  {calendarSync ? "Synced with Google Calendar" : "Not connected"}
-                </p>
-              </div>
-              <Button variant="ghost" size="sm" className="shrink-0" onClick={() => setShowCalendarSheet(true)}>
-                {calendarSync ? "Settings" : "Connect"}
+          <Card style={styles.settingCard}>
+            <View style={styles.settingRow}>
+              <View style={styles.settingInfo}>
+                <Text style={styles.settingLabel}>Calendar Integration</Text>
+                <Text style={styles.settingValue}>
+                  {calendarSync ? 'Synced with Google Calendar' : 'Not connected'}
+                </Text>
+              </View>
+              <Button size="sm" onPress={() => {}}>
+                <Text>{calendarSync ? 'Settings' : 'Connect'}</Text>
               </Button>
-            </div>
+            </View>
           </Card>
-        </div>
+        </View>
 
         {/* Account & Billing Section */}
-        <div className="space-y-3">
-          <h2 className="text-sm font-medium uppercase tracking-wide text-muted-foreground">Account & Billing</h2>
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Account & Billing</Text>
 
-          <Card className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="font-medium">Current Plan</p>
-                <p className="text-sm text-muted-foreground">{currentPlan}</p>
-              </div>
-              {currentPlan === "Free" && (
-                <Button size="sm" onClick={() => onNavigate("paywall")}>
-                  Upgrade
+          <Card style={styles.settingCard}>
+            <View style={styles.settingRow}>
+              <View style={styles.settingInfo}>
+                <Text style={styles.settingLabel}>Current Plan</Text>
+                <Text style={styles.settingValue}>{currentPlan}</Text>
+              </View>
+              {currentPlan === 'Free' && (
+                <Button size="sm" onPress={() => onNavigate('paywall')}>
+                  <Text>Upgrade</Text>
                 </Button>
               )}
-            </div>
+            </View>
           </Card>
 
-          <Card className="p-4">
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <p className="font-medium">Usage This Month</p>
-                <p className="text-sm text-muted-foreground">
+          <Card style={styles.settingCard}>
+            <View style={styles.usageContainer}>
+              <View style={styles.settingRow}>
+                <Text style={styles.settingLabel}>Usage This Month</Text>
+                <Text style={styles.settingValue}>
                   {meetingsUsed} of {meetingsLimit}
-                </p>
-              </div>
-              <Progress value={(meetingsUsed / meetingsLimit) * 100} className="h-2" />
+                </Text>
+              </View>
+              <Progress value={(meetingsUsed / meetingsLimit) * 100} />
               {meetingsUsed >= meetingsLimit * 0.8 && (
-                <p className="text-xs text-orange-500">Running low on meetings. Upgrade for unlimited.</p>
+                <Text style={styles.warningText}>Running low on meetings. Upgrade for unlimited.</Text>
               )}
-            </div>
+            </View>
           </Card>
-        </div>
+        </View>
 
         {/* Data & Privacy Section */}
-        <div className="space-y-3">
-          <h2 className="text-sm font-medium uppercase tracking-wide text-muted-foreground">Data & Privacy</h2>
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Data & Privacy</Text>
 
           {showDeleteLocalConfirm ? (
-            <Card className="border-red-500/30 bg-red-500/5 p-4">
-              <div className="space-y-3">
-                <div className="flex items-start gap-2">
-                  <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-500" />
-                  <div>
-                    <p className="font-medium text-red-500">Delete local recordings?</p>
-                    <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+            <Card style={styles.warningCard}>
+              <View style={styles.warningContent}>
+                <Ionicons name="warning" size={20} color={Colors.red} />
+                <View style={styles.warningText}>
+                  <Text style={styles.warningTitle}>Delete local recordings?</Text>
+                  <Text style={styles.warningDescription}>
                       This will permanently delete 5 recordings stored on this device. Cloud data will not be affected.
-                    </p>
-                  </div>
-                </div>
-                <div className="flex justify-end gap-2">
-                  <Button size="sm" variant="ghost" onClick={() => setShowDeleteLocalConfirm(false)}>
-                    Cancel
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.warningButtons}>
+                <Button size="sm" variant="outline" onPress={() => setShowDeleteLocalConfirm(false)}>
+                  <Text>Cancel</Text>
                   </Button>
-                  <Button size="sm" variant="destructive">
-                    Delete Local
+                <Button size="sm" variant="destructive" onPress={() => setShowDeleteLocalConfirm(false)}>
+                  <Text>Delete Local</Text>
                   </Button>
-                </div>
-              </div>
+              </View>
             </Card>
           ) : (
-            <Card className="p-4">
+            <Card style={styles.settingCard}>
               <Button
                 variant="ghost"
-                className="w-full justify-start text-muted-foreground hover:text-foreground"
-                onClick={() => setShowDeleteLocalConfirm(true)}
+                onPress={() => setShowDeleteLocalConfirm(true)}
+                style={styles.deleteButton}
               >
-                <Trash2 className="mr-2 h-4 w-4" />
-                Delete local recordings
+                <Ionicons name="trash-outline" size={16} color={Colors.mutedForeground} />
+                <Text style={styles.deleteButtonText}>Delete local recordings</Text>
               </Button>
             </Card>
           )}
 
           {showDeleteCloudConfirm ? (
-            <Card className="border-red-500/30 bg-red-500/5 p-4">
-              <div className="space-y-3">
-                <div className="flex items-start gap-2">
-                  <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-500" />
-                  <div>
-                    <p className="font-medium text-red-500">Delete all cloud data?</p>
-                    <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+            <Card style={styles.warningCard}>
+              <View style={styles.warningContent}>
+                <Ionicons name="warning" size={20} color={Colors.red} />
+                <View style={styles.warningText}>
+                  <Text style={styles.warningTitle}>Delete all cloud data?</Text>
+                  <Text style={styles.warningDescription}>
                       This will permanently delete 12 meetings, transcripts, and summaries from the cloud. This action
                       cannot be undone.
-                    </p>
-                  </div>
-                </div>
-                <div className="flex justify-end gap-2">
-                  <Button size="sm" variant="ghost" onClick={() => setShowDeleteCloudConfirm(false)}>
-                    Cancel
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.warningButtons}>
+                <Button size="sm" variant="outline" onPress={() => setShowDeleteCloudConfirm(false)}>
+                  <Text>Cancel</Text>
                   </Button>
-                  <Button size="sm" variant="destructive">
-                    Delete All
+                <Button size="sm" variant="destructive" onPress={() => setShowDeleteCloudConfirm(false)}>
+                  <Text>Delete All</Text>
                   </Button>
-                </div>
-              </div>
+              </View>
             </Card>
           ) : (
-            <Card className="p-4">
+            <Card style={styles.settingCard}>
               <Button
                 variant="ghost"
-                className="w-full justify-start text-red-500 hover:text-red-600"
-                onClick={() => setShowDeleteCloudConfirm(true)}
+                onPress={() => setShowDeleteCloudConfirm(true)}
+                style={styles.deleteButton}
               >
-                <Trash2 className="mr-2 h-4 w-4" />
-                Delete all cloud data
+                <Ionicons name="trash-outline" size={16} color={Colors.red} />
+                <Text style={[styles.deleteButtonText, { color: Colors.red }]}>Delete all cloud data</Text>
               </Button>
             </Card>
           )}
 
-          <Card className="p-4">
-            <p className="text-sm leading-relaxed text-muted-foreground">
+          <Card style={styles.infoCard}>
+            <Text style={styles.infoText}>
               Your recordings are encrypted and stored securely. We process audio using AI to generate transcripts and
               summaries. Data is retained for 90 days unless deleted manually.
-            </p>
+            </Text>
           </Card>
-        </div>
+        </View>
+      </View>
 
-        {/* Bottom Spacing */}
-        <div className="h-8" />
-      </div>
-
-      {showAudioQualitySheet && (
-        <div
-          className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm"
-          onClick={() => setShowAudioQualitySheet(false)}
+      {/* Audio Quality Modal */}
+      <Modal visible={showAudioQualityModal} transparent animationType="slide">
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowAudioQualityModal(false)}
         >
-          <div
-            className="fixed bottom-0 left-0 right-0 mx-auto max-w-md rounded-t-2xl border-t border-l border-r border-border bg-background p-6"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-lg font-medium">Audio Quality</h3>
-              <Button variant="ghost" size="icon" onClick={() => setShowAudioQualitySheet(false)}>
-                <X className="h-4 w-4" />
+          <View style={styles.modalContent} onStartShouldSetResponder={() => true}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Audio Quality</Text>
+              <Button variant="ghost" size="icon" onPress={() => setShowAudioQualityModal(false)}>
+                <Ionicons name="close" size={20} color={Colors.foreground} />
               </Button>
-            </div>
-            <div className="space-y-2">
+            </View>
+            <View style={styles.modalOptions}>
               <Button
-                variant={audioQuality === "high" ? "default" : "outline"}
-                className="w-full justify-start"
-                onClick={() => {
-                  setAudioQuality("high")
-                  setShowAudioQualitySheet(false)
+                variant={audioQuality === 'high' ? 'default' : 'outline'}
+                style={styles.modalOption}
+                onPress={() => {
+                  setAudioQuality('high')
+                  setShowAudioQualityModal(false)
                 }}
               >
-                <CheckCircle2 className="mr-2 h-4 w-4" />
-                High (best quality, larger files)
+                <Text>High (best quality, larger files)</Text>
               </Button>
               <Button
-                variant={audioQuality === "medium" ? "default" : "outline"}
-                className="w-full justify-start"
-                onClick={() => {
-                  setAudioQuality("medium")
-                  setShowAudioQualitySheet(false)
+                variant={audioQuality === 'medium' ? 'default' : 'outline'}
+                style={styles.modalOption}
+                onPress={() => {
+                  setAudioQuality('medium')
+                  setShowAudioQualityModal(false)
                 }}
               >
-                <CheckCircle2 className="mr-2 h-4 w-4" />
-                Medium (balanced)
+                <Text>Medium (balanced)</Text>
               </Button>
               <Button
-                variant={audioQuality === "low" ? "default" : "outline"}
-                className="w-full justify-start"
-                onClick={() => {
-                  setAudioQuality("low")
-                  setShowAudioQualitySheet(false)
+                variant={audioQuality === 'low' ? 'default' : 'outline'}
+                style={styles.modalOption}
+                onPress={() => {
+                  setAudioQuality('low')
+                  setShowAudioQualityModal(false)
                 }}
               >
-                <CheckCircle2 className="mr-2 h-4 w-4" />
-                Low (smallest files)
+                <Text>Low (smallest files)</Text>
               </Button>
-            </div>
-          </div>
-        </div>
-      )}
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
-      {showProcessingModeSheet && (
-        <div
-          className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm"
-          onClick={() => setShowProcessingModeSheet(false)}
+      {/* Processing Mode Modal */}
+      <Modal visible={showProcessingModeModal} transparent animationType="slide">
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowProcessingModeModal(false)}
         >
-          <div
-            className="fixed bottom-0 left-0 right-0 mx-auto max-w-md rounded-t-2xl border-t border-l border-r border-border bg-background p-6"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-lg font-medium">Processing Mode</h3>
-              <Button variant="ghost" size="icon" onClick={() => setShowProcessingModeSheet(false)}>
-                <X className="h-4 w-4" />
+          <View style={styles.modalContent} onStartShouldSetResponder={() => true}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Processing Mode</Text>
+              <Button variant="ghost" size="icon" onPress={() => setShowProcessingModeModal(false)}>
+                <Ionicons name="close" size={20} color={Colors.foreground} />
               </Button>
-            </div>
-            <div className="space-y-2">
+            </View>
+            <View style={styles.modalOptions}>
               <Button
-                variant={processingMode === "cloud" ? "default" : "outline"}
-                className="w-full justify-start"
-                onClick={() => {
-                  setProcessingMode("cloud")
-                  setShowProcessingModeSheet(false)
+                variant={processingMode === 'cloud' ? 'default' : 'outline'}
+                style={styles.modalOption}
+                onPress={() => {
+                  setProcessingMode('cloud')
+                  setShowProcessingModeModal(false)
                 }}
               >
-                <CheckCircle2 className="mr-2 h-4 w-4" />
-                Cloud (fast, requires internet)
+                <Text>Cloud (fast, requires internet)</Text>
               </Button>
               <Button
-                variant={processingMode === "hybrid" ? "default" : "outline"}
-                className="w-full justify-start"
-                onClick={() => {
-                  setProcessingMode("hybrid")
-                  setShowProcessingModeSheet(false)
+                variant={processingMode === 'hybrid' ? 'default' : 'outline'}
+                style={styles.modalOption}
+                onPress={() => {
+                  setProcessingMode('hybrid')
+                  setShowProcessingModeModal(false)
                 }}
               >
-                <CheckCircle2 className="mr-2 h-4 w-4" />
-                Hybrid (works offline)
+                <Text>Hybrid (works offline)</Text>
               </Button>
-            </div>
-          </div>
-        </div>
-      )}
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
-      {showSummaryStyleSheet && (
-        <div
-          className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm"
-          onClick={() => setShowSummaryStyleSheet(false)}
+      {/* Summary Style Modal */}
+      <Modal visible={showSummaryStyleModal} transparent animationType="slide">
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowSummaryStyleModal(false)}
         >
-          <div
-            className="fixed bottom-0 left-0 right-0 mx-auto max-w-md rounded-t-2xl border-t border-l border-r border-border bg-background p-6"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-lg font-medium">Summary Style</h3>
-              <Button variant="ghost" size="icon" onClick={() => setShowSummaryStyleSheet(false)}>
-                <X className="h-4 w-4" />
+          <View style={styles.modalContent} onStartShouldSetResponder={() => true}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Summary Style</Text>
+              <Button variant="ghost" size="icon" onPress={() => setShowSummaryStyleModal(false)}>
+                <Ionicons name="close" size={20} color={Colors.foreground} />
               </Button>
-            </div>
-            <div className="space-y-2">
+            </View>
+            <View style={styles.modalOptions}>
               <Button
-                variant={summaryStyle === "action-focused" ? "default" : "outline"}
-                className="w-full justify-start"
-                onClick={() => {
-                  setSummaryStyle("action-focused")
-                  setShowSummaryStyleSheet(false)
+                variant={summaryStyle === 'action-focused' ? 'default' : 'outline'}
+                style={styles.modalOption}
+                onPress={() => {
+                  setSummaryStyle('action-focused')
+                  setShowSummaryStyleModal(false)
                 }}
               >
-                <CheckCircle2 className="mr-2 h-4 w-4" />
-                Action-focused (decisions & tasks)
+                <Text>Action-focused (decisions & tasks)</Text>
               </Button>
               <Button
-                variant={summaryStyle === "detailed" ? "default" : "outline"}
-                className="w-full justify-start"
-                onClick={() => {
-                  setSummaryStyle("detailed")
-                  setShowSummaryStyleSheet(false)
+                variant={summaryStyle === 'detailed' ? 'default' : 'outline'}
+                style={styles.modalOption}
+                onPress={() => {
+                  setSummaryStyle('detailed')
+                  setShowSummaryStyleModal(false)
                 }}
               >
-                <CheckCircle2 className="mr-2 h-4 w-4" />
-                Detailed (comprehensive)
+                <Text>Detailed (comprehensive)</Text>
               </Button>
               <Button
-                variant={summaryStyle === "brief" ? "default" : "outline"}
-                className="w-full justify-start"
-                onClick={() => {
-                  setSummaryStyle("brief")
-                  setShowSummaryStyleSheet(false)
+                variant={summaryStyle === 'brief' ? 'default' : 'outline'}
+                style={styles.modalOption}
+                onPress={() => {
+                  setSummaryStyle('brief')
+                  setShowSummaryStyleModal(false)
                 }}
               >
-                <CheckCircle2 className="mr-2 h-4 w-4" />
-                Brief (key points only)
+                <Text>Brief (key points only)</Text>
               </Button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showCalendarSheet && (
-        <div
-          className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm"
-          onClick={() => setShowCalendarSheet(false)}
-        >
-          <div
-            className="fixed bottom-0 left-0 right-0 mx-auto max-w-md rounded-t-2xl border-t border-l border-r border-border bg-background p-6"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-lg font-medium">Calendar Integration</h3>
-              <Button variant="ghost" size="icon" onClick={() => setShowCalendarSheet(false)}>
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-
-            {calendarSync ? (
-              <div className="space-y-4">
-                <Card className="border-accent/30 bg-accent/5 p-4">
-                  <div className="flex items-center gap-3">
-                    <CheckCircle2 className="h-5 w-5 text-accent" />
-                    <div>
-                      <p className="font-medium">Connected to Google Calendar</p>
-                      <p className="text-xs text-muted-foreground">user@example.com</p>
-                    </div>
-                  </div>
-                </Card>
-
-                <div className="space-y-3">
-                  <label className="flex items-center justify-between">
-                    <span className="text-sm">Auto-create calendar events</span>
-                    <Switch defaultChecked />
-                  </label>
-                  <label className="flex items-center justify-between">
-                    <span className="text-sm">Export action items as tasks</span>
-                    <Switch />
-                  </label>
-                </div>
-
-                <Button
-                  variant="outline"
-                  className="w-full text-red-500 hover:text-red-600 bg-transparent"
-                  onClick={() => {
-                    setCalendarSync(false)
-                    setShowCalendarSheet(false)
-                  }}
-                >
-                  Disconnect Calendar
-                </Button>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <p className="text-sm text-muted-foreground">
-                  Connect your calendar to automatically create events from meetings and export action items as tasks.
-                </p>
-                <Button
-                  className="w-full"
-                  onClick={() => {
-                    setCalendarSync(true)
-                    setShowCalendarSheet(false)
-                  }}
-                >
-                  <CalendarDays className="mr-2 h-4 w-4" />
-                  Connect Google Calendar
-                </Button>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+    </ScrollView>
   )
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: Colors.background,
+  },
+  contentContainer: {
+    paddingBottom: 32,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '500',
+    color: Colors.foreground,
+  },
+  headerSpacer: {
+    width: 40,
+  },
+  content: {
+    paddingHorizontal: 24,
+    paddingVertical: 24,
+    gap: 24,
+  },
+  section: {
+    gap: 12,
+  },
+  sectionTitle: {
+    fontSize: 12,
+    fontWeight: '500',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    color: Colors.mutedForeground,
+    marginBottom: 4,
+  },
+  settingCard: {
+    padding: 16,
+  },
+  settingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  settingInfo: {
+    flex: 1,
+  },
+  settingLabel: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: Colors.foreground,
+    marginBottom: 4,
+  },
+  settingValue: {
+    fontSize: 14,
+    color: Colors.mutedForeground,
+    textTransform: 'capitalize',
+  },
+  settingDescription: {
+    fontSize: 14,
+    color: Colors.mutedForeground,
+    marginTop: 4,
+  },
+  storageContainer: {
+    gap: 12,
+  },
+  storageText: {
+    fontSize: 12,
+    color: Colors.mutedForeground,
+  },
+  usageContainer: {
+    gap: 12,
+  },
+  warningText: {
+    fontSize: 12,
+    color: Colors.orange,
+  },
+  infoCard: {
+    borderColor: Colors.accent + '4D',
+    backgroundColor: Colors.accent + '0D',
+    padding: 16,
+  },
+  infoText: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: Colors.mutedForeground,
+  },
+  infoBold: {
+    fontWeight: '500',
+    color: Colors.foreground,
+  },
+  warningCard: {
+    borderColor: Colors.red + '4D',
+    backgroundColor: Colors.red + '0D',
+    padding: 16,
+    gap: 12,
+  },
+  warningContent: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  warningTitle: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: Colors.red,
+    marginBottom: 4,
+  },
+  warningDescription: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: Colors.mutedForeground,
+  },
+  warningButtons: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 8,
+  },
+  deleteButton: {
+    width: '100%',
+    justifyContent: 'flex-start',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  deleteButtonText: {
+    fontSize: 14,
+    color: Colors.mutedForeground,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: Colors.background,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    padding: 24,
+    gap: 16,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '500',
+    color: Colors.foreground,
+  },
+  modalOptions: {
+    gap: 8,
+  },
+  modalOption: {
+    width: '100%',
+  },
+})

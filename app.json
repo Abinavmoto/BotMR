@@ -1,0 +1,67 @@
+{
+  "expo": {
+    "name": "BotMR",
+    "slug": "botmr",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./public/icon-light-32x32.png",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./public/icon-light-32x32.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#000000"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.botmr.app",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "BotMR needs access to your microphone to record meetings.",
+        "NSUserNotificationsUsageDescription": "BotMR needs permission to show notifications when recording in the background.",
+        "UIBackgroundModes": [
+          "audio"
+        ],
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./public/icon-light-32x32.png",
+        "backgroundColor": "#000000"
+      },
+      "package": "com.botmr.app",
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MICROPHONE",
+        "android.permission.WAKE_LOCK"
+      ],
+      "blockedPermissions": []
+    },
+    "web": {
+      "favicon": "./public/icon-light-32x32.png"
+    },
+    "plugins": [
+      "expo-asset",
+      "expo-sqlite",
+      "expo-dev-client",
+      [
+        "expo-notifications",
+        {
+          "icon": "./public/icon-light-32x32.png",
+          "color": "#C8E6A0"
+        }
+      ],
+      "./android-manifest.plugin.js",
+      "expo-font"
+    ],
+    "scheme": "botmr",
+    "extra": {
+      "eas": {
+        "projectId": "757504ce-010b-4a10-bffc-84cbca3777b9"
+      }
+    }
+  }
+}

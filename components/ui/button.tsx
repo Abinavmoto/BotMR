@@ -1,60 +1,170 @@
-import * as React from 'react'
-import { Slot } from '@radix-ui/react-slot'
-import { cva, type VariantProps } from 'class-variance-authority'
-
+import React from 'react'
+import { TouchableOpacity, Text, StyleSheet, ViewStyle, TextStyle, ActivityIndicator } from 'react-native'
+import { Colors } from '@/constants/Colors'
 import { cn } from '@/lib/utils'
 
-const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive",
-  {
-    variants: {
-      variant: {
-        default: 'bg-primary text-primary-foreground hover:bg-primary/90',
-        destructive:
-          'bg-destructive text-white hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40 dark:bg-destructive/60',
-        outline:
-          'border bg-background shadow-xs hover:bg-accent hover:text-accent-foreground dark:bg-input/30 dark:border-input dark:hover:bg-input/50',
-        secondary:
-          'bg-secondary text-secondary-foreground hover:bg-secondary/80',
-        ghost:
-          'hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50',
-        link: 'text-primary underline-offset-4 hover:underline',
-      },
-      size: {
-        default: 'h-9 px-4 py-2 has-[>svg]:px-3',
-        sm: 'h-8 rounded-md gap-1.5 px-3 has-[>svg]:px-2.5',
-        lg: 'h-10 rounded-md px-6 has-[>svg]:px-4',
-        icon: 'size-9',
-        'icon-sm': 'size-8',
-        'icon-lg': 'size-10',
-      },
-    },
-    defaultVariants: {
-      variant: 'default',
-      size: 'default',
-    },
-  },
-)
+/**
+ * Button Component - Standardized button styles for the app
+ * 
+ * Usage Guidelines:
+ * - 'default' (or no variant): Use for all primary action buttons (Change, Retry, Connect, Save, etc.)
+ * - 'outline': Use for secondary actions (Cancel buttons in modals)
+ * - 'ghost': Use ONLY for icon-only buttons (back, close, navigation icons)
+ * - 'destructive': Use for dangerous actions (Delete, Remove, etc.)
+ * 
+ * This ensures consistency across the entire app.
+ */
+interface ButtonProps {
+  variant?: 'default' | 'destructive' | 'outline' | 'secondary' | 'ghost' | 'link'
+  size?: 'default' | 'sm' | 'lg' | 'icon' | 'icon-sm' | 'icon-lg'
+  children?: React.ReactNode
+  onPress?: () => void
+  disabled?: boolean
+  loading?: boolean
+  className?: string
+  style?: ViewStyle
+}
 
-function Button({
-  className,
-  variant,
-  size,
-  asChild = false,
-  ...props
-}: React.ComponentProps<'button'> &
-  VariantProps<typeof buttonVariants> & {
-    asChild?: boolean
-  }) {
-  const Comp = asChild ? Slot : 'button'
+export function Button({
+  variant = 'default', // Default to filled button for consistency
+  size = 'default',
+  children,
+  onPress,
+  disabled = false,
+  loading = false,
+  style,
+}: ButtonProps) {
+  const buttonStyle = [
+    styles.base,
+    styles[variant],
+    styles[`size_${size}`],
+    (disabled || loading) && styles.disabled,
+    style,
+  ]
+
+  const textStyle = [
+    styles.text,
+    styles[`text_${variant}`],
+    styles[`textSize_${size}`],
+  ]
 
   return (
-    <Comp
-      data-slot="button"
-      className={cn(buttonVariants({ variant, size, className }))}
-      {...props}
-    />
+    <TouchableOpacity
+      style={buttonStyle}
+      onPress={onPress}
+      disabled={disabled || loading}
+      activeOpacity={0.7}
+    >
+      {loading ? (
+        <ActivityIndicator size="small" color={variant === 'default' ? Colors.primaryForeground : Colors.foreground} />
+      ) : typeof children === 'string' ? (
+        <Text style={textStyle}>{children}</Text>
+      ) : (
+        children
+      )}
+    </TouchableOpacity>
   )
 }
 
-export { Button, buttonVariants }
+const styles = StyleSheet.create({
+  base: {
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+  },
+  default: {
+    backgroundColor: Colors.primary,
+  },
+  destructive: {
+    backgroundColor: Colors.destructive,
+  },
+  outline: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  secondary: {
+    backgroundColor: Colors.secondary,
+  },
+  ghost: {
+    backgroundColor: 'transparent',
+  },
+  link: {
+    backgroundColor: 'transparent',
+  },
+  size_default: {
+    height: 36,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  size_sm: {
+    height: 32,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  size_lg: {
+    height: 40,
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+  },
+  size_icon: {
+    width: 36,
+    height: 36,
+    padding: 0,
+  },
+  'size_icon-sm': {
+    width: 32,
+    height: 32,
+    padding: 0,
+  },
+  'size_icon-lg': {
+    width: 40,
+    height: 40,
+    padding: 0,
+  },
+  disabled: {
+    opacity: 0.5,
+  },
+  text: {
+    fontWeight: '500',
+    fontSize: 14,
+  },
+  text_default: {
+    color: Colors.primaryForeground,
+  },
+  text_destructive: {
+    color: Colors.destructiveForeground,
+  },
+  text_outline: {
+    color: Colors.foreground,
+  },
+  text_secondary: {
+    color: Colors.secondaryForeground,
+  },
+  text_ghost: {
+    color: Colors.foreground,
+  },
+  text_link: {
+    color: Colors.primary,
+    textDecorationLine: 'underline',
+  },
+  textSize_default: {
+    fontSize: 14,
+  },
+  textSize_sm: {
+    fontSize: 12,
+  },
+  textSize_lg: {
+    fontSize: 16,
+  },
+  textSize_icon: {
+    fontSize: 14,
+  },
+  'textSize_icon-sm': {
+    fontSize: 12,
+  },
+  'textSize_icon-lg': {
+    fontSize: 16,
+  },
+})

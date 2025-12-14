@@ -1,143 +1,386 @@
-"use client"
+import React, { useState, useEffect } from 'react'
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native'
+import { Ionicons } from '@expo/vector-icons'
+import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
+import { Colors } from '@/constants/Colors'
+import { MeetingRepository, Meeting } from '@/src/db/MeetingRepository'
+import { openDatabase } from '@/src/db/database'
 
-import { Mic, Clock, Settings, WifiOff, CloudUpload, AlertCircle, CheckCircle2, FolderOpen } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
+import { NavigationHandler } from '@/src/types/navigation'
 
 interface HomeScreenProps {
-  onNavigate: (
-    screen: "home" | "recording" | "processing" | "summary" | "paywall" | "settings" | "all-meetings",
-  ) => void
+  onNavigate: NavigationHandler
 }
 
 export function HomeScreen({ onNavigate }: HomeScreenProps) {
-  const isOffline = false
-  const hasSyncSuccess = true
+  const [meetings, setMeetings] = useState<Meeting[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [showRecoveryBanner, setShowRecoveryBanner] = useState(false)
+  const [recentPartialMeeting, setRecentPartialMeeting] = useState<Meeting | null>(null)
+
+  useEffect(() => {
+    loadMeetings()
+    checkForPartialRecordings()
+    // Refresh when screen comes into focus
+    const interval = setInterval(() => {
+      loadMeetings()
+      checkForPartialRecordings()
+    }, 2000)
+    return () => clearInterval(interval)
+  }, [])
+
+  const checkForPartialRecordings = async () => {
+    try {
+      await openDatabase()
+      const allMeetings = await MeetingRepository.listMeetings()
+      // Find most recent partial recording (within last 5 minutes)
+      const fiveMinutesAgo = Date.now() - 5 * 60 * 1000
+      const recentPartial = allMeetings.find(
+        (m) => m.status === 'recorded_partial' && m.created_at > fiveMinutesAgo
+      )
+      
+      if (recentPartial) {
+        setRecentPartialMeeting(recentPartial)
+        setShowRecoveryBanner(true)
+      } else {
+        setShowRecoveryBanner(false)
+        setRecentPartialMeeting(null)
+      }
+    } catch (error) {
+      console.error('Error checking for partial recordings:', error)
+    }
+  }
+
+  const loadMeetings = async () => {
+    try {
+      await openDatabase() // Ensure DB is initialized
+      const loadedMeetings = await MeetingRepository.listMeetings()
+      setMeetings(loadedMeetings)
+    } catch (error) {
+      console.error('Error loading meetings:', error)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const formatDuration = (seconds: number) => {
+    const mins = Math.floor(seconds / 60)
+    const secs = seconds % 60
+    return `${mins}:${secs.toString().padStart(2, '0')}`
+  }
+
+  const formatDate = (timestamp: number) => {
+    const date = new Date(timestamp)
+    const now = new Date()
+    const diffMs = now.getTime() - date.getTime()
+    const diffMins = Math.floor(diffMs / 60000)
+    const diffHours = Math.floor(diffMs / 3600000)
+    const diffDays = Math.floor(diffMs / 86400000)
+
+    if (diffMins < 1) return 'Just now'
+    if (diffMins < 60) return `${diffMins}m ago`
+    if (diffHours < 24) return `${diffHours}h ago`
+    if (diffDays < 7) return `${diffDays}d ago`
+    return date.toLocaleDateString()
+  }
+
+  const getStatusConfig = (status: Meeting['status']) => {
+    switch (status) {
+      case 'recorded':
+        return {
+          icon: <View style={styles.recordedDot} />,
+          text: 'Recorded',
+          color: Colors.mutedForeground,
+        }
+      case 'recorded_partial':
+        return {
+          icon: <Ionicons name="alert-circle" size={14} color={Colors.orange} />,
+          text: 'Partial',
+          color: Colors.orange,
+        }
+      case 'processing':
+        return {
+          icon: <View style={styles.processingDot} />,
+          text: 'Processing',
+          color: Colors.accent,
+        }
+      case 'completed':
+        return {
+          icon: <Ionicons name="checkmark-circle" size={14} color={Colors.accent} />,
+          text: 'Ready',
+          color: Colors.accent,
+        }
+      case 'failed':
+        return {
+          icon: <Ionicons name="alert-circle" size={14} color={Colors.red} />,
+          text: 'Failed',
+          color: Colors.red,
+        }
+      default:
+        return {
+          icon: <View style={styles.recordedDot} />,
+          text: 'Recorded',
+          color: Colors.mutedForeground,
+        }
+    }
+  }
 
   return (
-    <div className="flex min-h-screen flex-col px-6 py-8">
+    <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <h1 className="font-mono text-2xl font-medium tracking-tight">BotMR</h1>
-        <div className="flex gap-2">
-          <Button variant="ghost" size="icon" onClick={() => onNavigate("all-meetings")}>
-            <FolderOpen className="h-5 w-5" />
+      <View style={styles.header}>
+        <Text style={styles.title}>BotMR</Text>
+        <View style={styles.headerButtons}>
+          <Button variant="ghost" size="icon" onPress={() => onNavigate('all-meetings')}>
+            <Ionicons name="folder-open-outline" size={20} color={Colors.foreground} />
           </Button>
-          <Button variant="ghost" size="icon" onClick={() => onNavigate("settings")}>
-            <Settings className="h-5 w-5" />
+          <Button variant="ghost" size="icon" onPress={() => onNavigate('settings')}>
+            <Ionicons name="settings-outline" size={20} color={Colors.foreground} />
           </Button>
-        </div>
-      </div>
-
-      {isOffline && (
-        <div className="mt-4 flex items-center gap-2 rounded-lg border border-orange-500/20 bg-orange-500/10 px-3 py-2 text-sm">
-          <WifiOff className="h-4 w-4 text-orange-500" />
-          <span className="text-orange-500">Offline mode • Recordings will sync later</span>
-        </div>
-      )}
-
-      {hasSyncSuccess && !isOffline && (
-        <div className="mt-4 flex items-center gap-2 rounded-lg border border-accent/20 bg-accent/10 px-3 py-2 text-sm">
-          <CheckCircle2 className="h-4 w-4 text-accent" />
-          <span className="text-accent">2 meetings synced successfully</span>
-        </div>
-      )}
+        </View>
+      </View>
 
       {/* Main Content */}
-      <div className="flex flex-1 flex-col items-center justify-center gap-12">
+      <View style={styles.mainContent}>
         {/* Large Record Button */}
-        <button
-          onClick={() => onNavigate("recording")}
-          className="group relative flex h-56 w-56 items-center justify-center rounded-full bg-accent transition-all duration-300 hover:scale-105 active:scale-95"
+        <TouchableOpacity
+          style={styles.recordButton}
+          onPress={() => onNavigate('recording')}
+          activeOpacity={0.8}
         >
-          <div className="absolute inset-4 rounded-full bg-background/10" />
-          <Mic className="h-24 w-24 text-accent-foreground" />
-        </button>
+          <View style={styles.recordButtonInner} />
+          <Ionicons name="mic" size={96} color={Colors.accentForeground} />
+        </TouchableOpacity>
 
-        <div className="text-center">
-          <h2 className="mb-2 text-3xl font-medium">Ready to Record</h2>
-          <p className="text-muted-foreground">Tap to start your meeting</p>
-        </div>
-      </div>
+        <View style={styles.recordTextContainer}>
+          <Text style={styles.recordTitle}>Ready to Record</Text>
+          <Text style={styles.recordSubtitle}>Tap to start your meeting</Text>
+        </View>
+      </View>
 
-      <div className="space-y-4">
-        <h3 className="text-sm font-medium uppercase tracking-wide text-muted-foreground">Recent Meetings</h3>
+      <View style={styles.recentSection}>
+        <Text style={styles.sectionTitle}>Recent Meetings</Text>
 
-        {/* Uploading State */}
-        <Card className="border-orange-500/30 bg-orange-500/5 p-4">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex-1 min-w-0">
-              <h4 className="mb-1 font-medium truncate">Team Standup</h4>
-              <p className="text-sm text-muted-foreground">15 min • 5 action items</p>
-            </div>
-            <div className="flex shrink-0 items-center gap-1.5 text-xs text-orange-500">
-              <CloudUpload className="h-3.5 w-3.5" />
-              <span className="whitespace-nowrap">Uploading</span>
-            </div>
-          </div>
-        </Card>
-
-        {/* Processing State */}
-        <Card className="border-accent/30 bg-accent/5 p-4">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex-1 min-w-0">
-              <h4 className="mb-1 font-medium truncate">Design Review</h4>
-              <p className="text-sm text-muted-foreground">28 min • Processing...</p>
-            </div>
-            <div className="flex shrink-0 items-center gap-1.5 text-xs text-accent">
-              <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
-              <span className="whitespace-nowrap">Processing</span>
-            </div>
-          </div>
-        </Card>
-
-        {/* Ready State */}
-        <Card className="cursor-pointer p-4 transition-colors hover:bg-secondary" onClick={() => onNavigate("summary")}>
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex-1 min-w-0">
-              <h4 className="mb-1 font-medium truncate">Q4 Planning Session</h4>
-              <p className="text-sm text-muted-foreground">45 min • 3 action items</p>
-            </div>
-            <div className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
-              <Clock className="h-3 w-3" />
-              <span className="whitespace-nowrap">2h ago</span>
-            </div>
-          </div>
-        </Card>
-
-        {/* Error State - Single action: Retry */}
-        <Card className="border-red-500/30 bg-red-500/5 p-4">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex-1 min-w-0">
-              <h4 className="mb-1 font-medium truncate">Client Review</h4>
-              <p className="text-sm text-muted-foreground">30 min • Upload failed</p>
-            </div>
-            <div className="flex shrink-0 flex-col items-end gap-2">
-              <div className="flex items-center gap-1.5 text-xs text-red-500">
-                <AlertCircle className="h-3.5 w-3.5" />
-                <span className="whitespace-nowrap">Error</span>
-              </div>
-              <Button size="sm" variant="outline" className="h-7 bg-transparent text-xs">
-                Retry
+        {/* Recovery Banner for Partial Recordings */}
+        {showRecoveryBanner && recentPartialMeeting && (
+          <Card style={styles.recoveryCard}>
+            <View style={styles.recoveryContent}>
+              <Ionicons name="information-circle" size={20} color={Colors.orange} />
+              <View style={styles.recoveryTextContainer}>
+                <Text style={styles.recoveryTitle}>
+                  Previous recording was interrupted
+                </Text>
+                <Text style={styles.recoverySubtitle}>
+                  Partial audio is available. Tap to view.
+                </Text>
+              </View>
+              <Button
+                size="sm"
+                variant="outline"
+                onPress={() => {
+                  setShowRecoveryBanner(false)
+                  onNavigate('meeting-detail', recentPartialMeeting.id)
+                }}
+              >
+                <Text>View</Text>
               </Button>
-            </div>
-          </div>
-        </Card>
+            </View>
+          </Card>
+        )}
 
-        {/* Recorded (Local) State */}
-        <Card className="p-4">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex-1 min-w-0">
-              <h4 className="mb-1 font-medium truncate">Morning Sync</h4>
-              <p className="text-sm text-muted-foreground">12 min • Saved locally</p>
-            </div>
-            <div className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
-              <div className="h-1.5 w-1.5 rounded-full bg-muted-foreground" />
-              <span className="whitespace-nowrap">Recorded</span>
-            </div>
-          </div>
+        {isLoading ? (
+          <Card>
+            <Text style={styles.loadingText}>Loading meetings...</Text>
         </Card>
-      </div>
-    </div>
+        ) : meetings.length === 0 ? (
+          <Card>
+            <Text style={styles.emptyText}>No meetings yet. Start recording to create your first meeting!</Text>
+        </Card>
+        ) : (
+          meetings.slice(0, 5).map((meeting) => {
+            const statusConfig = getStatusConfig(meeting.status)
+            return (
+              <TouchableOpacity
+                key={meeting.id}
+                onPress={() => onNavigate('meeting-detail', meeting.id)}
+              >
+                <Card>
+                  <View style={styles.cardContent}>
+                    <View style={styles.cardTextContainer}>
+                      <Text style={styles.cardTitle}>{meeting.title}</Text>
+                      <Text style={styles.cardSubtitle}>
+                        {formatDuration(meeting.duration_sec)} • {formatDate(meeting.created_at)}
+                      </Text>
+                    </View>
+                    <View style={styles.statusContainer}>
+                      {statusConfig.icon}
+                      <Text style={[styles.statusText, { color: statusConfig.color }]}>{statusConfig.text}</Text>
+                    </View>
+                  </View>
+        </Card>
+              </TouchableOpacity>
+            )
+          })
+        )}
+      </View>
+    </ScrollView>
   )
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: Colors.background,
+  },
+  contentContainer: {
+    paddingHorizontal: 24,
+    paddingVertical: 32,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: '500',
+    color: Colors.foreground,
+    fontFamily: 'monospace',
+    letterSpacing: -0.5,
+  },
+  headerButtons: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  mainContent: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 48,
+    marginVertical: 48,
+  },
+  recordButton: {
+    width: 224,
+    height: 224,
+    borderRadius: 112,
+    backgroundColor: Colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: Colors.accent,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  recordButtonInner: {
+    position: 'absolute',
+    top: 16,
+    left: 16,
+    right: 16,
+    bottom: 16,
+    borderRadius: 96,
+    backgroundColor: Colors.background + '1A',
+  },
+  recordTextContainer: {
+    alignItems: 'center',
+  },
+  recordTitle: {
+    fontSize: 30,
+    fontWeight: '500',
+    color: Colors.foreground,
+    marginBottom: 8,
+  },
+  recordSubtitle: {
+    fontSize: 14,
+    color: Colors.mutedForeground,
+  },
+  recentSection: {
+    gap: 16,
+  },
+  sectionTitle: {
+    fontSize: 12,
+    fontWeight: '500',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    color: Colors.mutedForeground,
+    marginBottom: 4,
+  },
+  cardContent: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  cardTextContainer: {
+    flex: 1,
+    minWidth: 0,
+  },
+  cardTitle: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: Colors.foreground,
+    marginBottom: 4,
+  },
+  cardSubtitle: {
+    fontSize: 14,
+    color: Colors.mutedForeground,
+  },
+  statusContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  statusText: {
+    fontSize: 12,
+  },
+  recordedDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: Colors.mutedForeground,
+  },
+  processingDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: Colors.accent,
+  },
+  loadingText: {
+    fontSize: 14,
+    color: Colors.mutedForeground,
+    textAlign: 'center',
+    padding: 16,
+  },
+  emptyText: {
+    fontSize: 14,
+    color: Colors.mutedForeground,
+    textAlign: 'center',
+    padding: 16,
+  },
+  recoveryCard: {
+    marginBottom: 16,
+    borderColor: Colors.orange + '4D',
+    backgroundColor: Colors.orange + '0D',
+    padding: 16,
+  },
+  recoveryContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  recoveryTextContainer: {
+    flex: 1,
+  },
+  recoveryTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.orange,
+    marginBottom: 4,
+  },
+  recoverySubtitle: {
+    fontSize: 12,
+    color: Colors.mutedForeground,
+  },
+})
