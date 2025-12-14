@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { StyleSheet, StatusBar } from 'react-native'
+import { StyleSheet, StatusBar, Platform } from 'react-native'
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context'
 import { HomeScreen } from './components/home-screen'
 import { RecordingScreen } from './components/recording-screen'
@@ -12,6 +12,7 @@ import { MeetingDetailScreen } from './components/meeting-detail-screen'
 import { Colors } from './constants/Colors'
 import { openDatabase } from './src/db/database'
 import { Screen } from './src/types/navigation'
+// Note: Foreground service handler is registered in index.js (app entry point)
 
 interface NavigationState {
   screen: Screen
@@ -26,6 +27,9 @@ export default function App() {
     openDatabase().catch((error) => {
       console.error('Failed to initialize database:', error)
     })
+
+    // Note: Foreground service handler is registered in index.js (app entry point)
+    // No need to register here - it's already registered globally before App component loads
   }, [])
 
   const handleNavigate = (screen: Screen, meetingId?: string) => {

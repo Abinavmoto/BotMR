@@ -6,6 +6,8 @@ import { Platform } from 'react-native'
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
+    shouldShowBanner: true, // Use new API
+    shouldShowList: true, // Use new API
     shouldPlaySound: false, // Don't play sound during recording
     shouldSetBadge: false,
   }),

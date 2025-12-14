@@ -49,13 +49,8 @@ export function RecordingScreen({ onNavigate }: RecordingScreenProps) {
 
   useEffect(() => {
     requestPermissions()
-    // Initialize foreground service on Android
-    if (Platform.OS === 'android') {
-      // CRITICAL: Register the foreground service handler first
-      registerForegroundServiceHandler()
-      // Then create the channel
-      createForegroundServiceChannel().catch(console.error)
-    }
+    // Note: Foreground service handler is registered in App.tsx on app startup
+    // No need to register here - it's already registered globally
     return () => {
       cleanup()
     }
@@ -668,6 +663,35 @@ export function RecordingScreen({ onNavigate }: RecordingScreenProps) {
       // Additional delay after audio mode configuration to ensure session is ready
       await new Promise(resolve => setTimeout(resolve, 500))
 
+      // CRITICAL: On Android, start foreground service notification BEFORE creating recording
+      // This ensures the notification is visible and the service is active when recording starts
+      if (Platform.OS === 'android') {
+        console.log('📱 [Recording] Starting foreground service notification BEFORE recording creation...')
+        const serviceStarted = await startForegroundService(0)
+        if (!serviceStarted) {
+          // Foreground service failed - cannot record in background
+          console.error('❌ [Recording] Foreground service failed to start - stopping recording')
+          Alert.alert(
+            'Background Recording Unavailable',
+            'Android requires a foreground service to record in background. Please check notification permissions in Settings.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Open Settings',
+                onPress: () => Linking.openSettings(),
+              },
+            ],
+          )
+          return
+        }
+        console.log('✅ [Recording] Foreground service notification started successfully')
+        foregroundServiceNotificationIdRef.current = 'foreground-service-active'
+        setForegroundServiceActive(true)
+        
+        // Small delay to ensure notification is fully displayed
+        await new Promise(resolve => setTimeout(resolve, 200))
+      }
+
       // Create new recording with retry logic
       let newRecording: Audio.Recording
       let createAttempts = 0
@@ -737,34 +761,9 @@ export function RecordingScreen({ onNavigate }: RecordingScreenProps) {
         console.warn('Initial status check failed (non-critical):', statusError)
       }
 
-      // CRITICAL: On Android, start foreground service BEFORE allowing background recording
-      if (Platform.OS === 'android') {
-        const serviceStarted = await startForegroundService(0)
-        if (!serviceStarted) {
-          // Foreground service failed - cannot record in background
-          console.error('❌ Foreground service failed to start - stopping recording')
-          await stopRecordingInternal()
-          await resetAudioMode()
-          
-          Alert.alert(
-            'Background Recording Unavailable',
-            'Android requires a foreground service to record in background. Please check notification permissions in Settings.',
-            [
-              { text: 'Cancel', style: 'cancel' },
-              {
-                text: 'Open Settings',
-                onPress: () => Linking.openSettings(),
-              },
-            ],
-          )
-          return
-        }
-        
-        foregroundServiceNotificationIdRef.current = 'foreground-service-active'
-        setForegroundServiceActive(true)
-        console.log('✅ Foreground service started - background recording enabled')
-      } else {
-        // iOS: Show informational notification
+      // Note: Foreground service notification was already started BEFORE recording creation (above)
+      // For iOS, show informational notification
+      if (Platform.OS !== 'android') {
         showRecordingStoppedNotification('Recording started').catch(console.error)
       }
       
