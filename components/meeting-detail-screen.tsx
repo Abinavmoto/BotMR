@@ -1,11 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { View, Text, StyleSheet, ScrollView, Alert, AppState, AppStateStatus } from 'react-native'
+import { View, Text, StyleSheet, ScrollView, Alert, AppState, AppStateStatus, Platform } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { Audio } from 'expo-av'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
 import { Colors } from '@/constants/Colors'
 import { MeetingRepository, Meeting } from '@/src/db/MeetingRepository'
+import { deleteRecordingFile } from '@/src/services/audioService'
+import * as FileSystem from 'expo-file-system/legacy'
 
 import { NavigationHandler } from '@/src/types/navigation'
 
@@ -20,7 +23,43 @@ export function MeetingDetailScreen({ meetingId, onNavigate }: MeetingDetailScre
   const [isPlaying, setIsPlaying] = useState(false)
   const [playbackPosition, setPlaybackPosition] = useState(0)
   const [duration, setDuration] = useState(0)
+  const [isEditingTitle, setIsEditingTitle] = useState(false)
+  const [editedTitle, setEditedTitle] = useState('')
+  const [isSaving, setIsSaving] = useState(false)
+  const [audioError, setAudioError] = useState<string | null>(null)
   const appStateRef = useRef<AppStateStatus>(AppState.currentState)
+  const soundRef = useRef<Audio.Sound | null>(null)
+
+  // Keep sound ref in sync with state
+  useEffect(() => {
+    soundRef.current = sound
+  }, [sound])
+
+  const cleanupAudio = async () => {
+    const currentSound = soundRef.current
+    if (currentSound) {
+      try {
+        // Get current status
+        const status = await currentSound.getStatusAsync()
+        
+        // Stop if playing
+        if (status.isLoaded && status.isPlaying) {
+          await currentSound.stopAsync()
+          setIsPlaying(false)
+        }
+        
+        // Then unload
+        await currentSound.unloadAsync()
+      } catch (error) {
+        console.warn('Error cleaning up audio:', error)
+      } finally {
+        setSound(null)
+        setIsPlaying(false)
+        setPlaybackPosition(0)
+        soundRef.current = null
+      }
+    }
+  }
 
   useEffect(() => {
     loadMeeting()
@@ -30,13 +69,21 @@ export function MeetingDetailScreen({ meetingId, onNavigate }: MeetingDetailScre
     appStateRef.current = AppState.currentState
     
     return () => {
-      if (sound) {
-        sound.unloadAsync().catch((error) => {
-          console.warn('Error unloading sound on cleanup:', error)
-        })
-      }
+      // Await cleanup to ensure audio is stopped before component unmounts
+      cleanupAudio().catch((error) => {
+        console.warn('Error in cleanup on unmount:', error)
+      })
     }
   }, [meetingId])
+
+  // Load sound when meeting is loaded (only if duration > 0)
+  useEffect(() => {
+    if (meeting && meeting.local_audio_uri && meeting.duration_sec > 0) {
+      loadSound()
+    } else if (meeting && meeting.duration_sec === 0) {
+      setAudioError('No audio recorded. This meeting has 0 seconds duration.')
+    }
+  }, [meeting])
 
   // Track app state changes separately to handle background audio pause
   useEffect(() => {
@@ -80,37 +127,315 @@ export function MeetingDetailScreen({ meetingId, onNavigate }: MeetingDetailScre
     try {
       const loadedMeeting = await MeetingRepository.getMeetingById(meetingId)
       setMeeting(loadedMeeting)
+      if (loadedMeeting) {
+        setEditedTitle(loadedMeeting.title)
+      }
     } catch (error) {
       console.error('Error loading meeting:', error)
     }
+  }
+
+  const handleEditTitle = () => {
+    if (meeting) {
+      setEditedTitle(meeting.title)
+      setIsEditingTitle(true)
+    }
+  }
+
+  const handleSaveTitle = async () => {
+    if (!meeting || !editedTitle.trim()) {
+      Alert.alert('Error', 'Title cannot be empty')
+      return
+    }
+
+    setIsSaving(true)
+    try {
+      const updated = await MeetingRepository.updateMeeting(meeting.id, {
+        title: editedTitle.trim(),
+      })
+      if (updated) {
+        setMeeting(updated)
+        setIsEditingTitle(false)
+      } else {
+        Alert.alert('Error', 'Failed to update meeting title')
+      }
+    } catch (error) {
+      console.error('Error updating meeting title:', error)
+      Alert.alert('Error', 'Failed to update meeting title')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const handleCancelEdit = () => {
+    if (meeting) {
+      setEditedTitle(meeting.title)
+    }
+    setIsEditingTitle(false)
+  }
+
+  const handleDeleteMeeting = () => {
+    if (!meeting) return
+
+    Alert.alert(
+      'Delete Meeting',
+      'Are you sure you want to delete this meeting? This action cannot be undone.',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              // Delete audio file
+              await deleteRecordingFile(meeting.local_audio_uri)
+              
+              // Delete from database
+              const deleted = await MeetingRepository.deleteMeeting(meeting.id)
+              
+              if (deleted) {
+                // Clean up audio before navigating
+                await cleanupAudio()
+                // Navigate back to home
+                onNavigate('home')
+              } else {
+                Alert.alert('Error', 'Failed to delete meeting')
+              }
+            } catch (error) {
+              console.error('Error deleting meeting:', error)
+              Alert.alert('Error', 'Failed to delete meeting')
+            }
+          },
+        },
+      ],
+    )
   }
 
   const loadSound = async () => {
     if (!meeting) return
 
     try {
+      // Clear any previous error
+      setAudioError(null)
+
+      console.log('🔊 [MeetingDetail] Loading audio...')
+      console.log('   - URI from database:', meeting.local_audio_uri)
+
+      // Normalize URI - FileSystem paths might already have file:// prefix
+      let normalizedUri = meeting.local_audio_uri.trim()
+      
+      // Remove any duplicate file:// prefixes
+      while (normalizedUri.startsWith('file://')) {
+        normalizedUri = normalizedUri.substring(7)
+      }
+      
+      // Ensure we have a proper file:// URI
+      if (!normalizedUri.startsWith('file://') && !normalizedUri.startsWith('http://') && !normalizedUri.startsWith('https://')) {
+        // Add file:// prefix
+        normalizedUri = `file://${normalizedUri}`
+      }
+
+      console.log('   - Normalized URI:', normalizedUri)
+
+      // Check if file exists before trying to load
+      // CRITICAL: expo-av on Android has a known issue with file:///data/... paths
+      // It strips /data from the path, looking for /user/0/... instead
+      // We need to use the path format that expo-av actually expects
+      
+      // Try both the original URI and normalized URI
+      let fileInfo = null
+      let finalUri = normalizedUri
+      let actualFilePath: string | null = null
+      let fileSystemPath: string | null = null
+      
+      try {
+        fileInfo = await FileSystem.getInfoAsync(meeting.local_audio_uri)
+        if (fileInfo.exists) {
+          finalUri = meeting.local_audio_uri
+          actualFilePath = meeting.local_audio_uri
+          // Get the path without file:// prefix for FileSystem operations
+          fileSystemPath = meeting.local_audio_uri.replace(/^file:\/\/+/, '')
+          console.log('✅ [MeetingDetail] File exists at original URI')
+          console.log('   - FileSystem path (no prefix):', fileSystemPath)
+        }
+      } catch (e) {
+        console.warn('⚠️ [MeetingDetail] Could not check original URI, trying normalized:', e)
+      }
+      
+      if (!fileInfo || !fileInfo.exists) {
+        try {
+          // Remove file:// to check with FileSystem
+          const checkUri = normalizedUri.startsWith('file://') ? normalizedUri.substring(7) : normalizedUri
+          fileInfo = await FileSystem.getInfoAsync(checkUri)
+          if (fileInfo.exists) {
+            finalUri = normalizedUri
+            actualFilePath = normalizedUri
+            fileSystemPath = checkUri
+            console.log('✅ [MeetingDetail] File exists at normalized URI')
+            console.log('   - FileSystem path (no prefix):', fileSystemPath)
+          }
+        } catch (e) {
+          console.warn('⚠️ [MeetingDetail] Could not check normalized URI:', e)
+        }
+      }
+      
+      // Use the FileSystem path (without file:// prefix) as the base
+      // This is the actual path that FileSystem uses and expo-av might need
+      if (fileSystemPath && fileInfo?.exists) {
+        console.log('   - Using FileSystem path as base:', fileSystemPath)
+        finalUri = fileSystemPath // Use path without prefix
+      }
+
+      if (!fileInfo || !fileInfo.exists) {
+        const errorMsg = `Audio file not found: ${meeting.local_audio_uri}`
+        console.error('❌ [MeetingDetail]', errorMsg)
+        console.error('   - Tried original URI:', meeting.local_audio_uri)
+        console.error('   - Tried normalized URI:', normalizedUri)
+        setAudioError('Audio file not found. The recording may not have been saved correctly.')
+        return
+      }
+
+      console.log('✅ [MeetingDetail] File exists, size:', fileInfo.size, 'bytes')
+      console.log('   - FileSystem path (verified):', fileSystemPath)
+      console.log('   - Final URI to use:', finalUri)
+
       if (sound) {
         await sound.unloadAsync()
       }
 
-      const { sound: newSound } = await Audio.Sound.createAsync(
-        { uri: meeting.local_audio_uri },
-        {
-          shouldPlay: false,
-          // Ensure audio plays through speakers, not just earpiece
-          playsInSilentModeIOS: true,
-          isMuted: false,
-          volume: 1.0,
-        },
-      )
+      // CRITICAL: expo-av on Android has a bug where it strips /data from file:///data/... paths
+      // The error shows it's looking for /user/0/... instead of /data/user/0/...
+      // We need to try multiple formats to work around this bug
+      
+      // Use the FileSystem path (without file:// prefix) as the base
+      // This is the actual path that FileSystem verified exists
+      const basePath = fileSystemPath || finalUri.replace(/^file:\/\/+/, '')
+      
+      console.log('   - Base path (from FileSystem):', basePath)
+      
+      // According to Expo documentation, file:/// (three slashes) is correct for absolute paths
+      // Try formats in order of preference:
+      // 1. Original URI as-is (file:///data/...) - this is the correct format
+      // 2. Absolute path without prefix (/data/...)
+      // 3. file:// (two slashes) - but this might not work for absolute paths
+      
+      // Build URI formats to try
+      // CRITICAL: expo-av on Android has a bug where it strips /data from file:///data/... paths
+      // Error shows it's looking for /user/0/... instead of /data/user/0/...
+      // We need to try multiple formats to work around this
+      const uriFormats: Array<{ name: string; uri: string }> = []
+      
+      // Priority 1: Absolute path without any prefix (most likely to work)
+      // expo-av might handle absolute paths better than file:// URIs
+      if (basePath && basePath.startsWith('/')) {
+        uriFormats.push({ name: 'Absolute path (no prefix)', uri: basePath })
+        console.log('   - Trying absolute path first:', basePath)
+      }
+      
+      // Priority 2: FileSystem path with file:// prefix (two slashes)
+      if (basePath && basePath.startsWith('/')) {
+        const twoSlashUri = `file://${basePath}`
+        uriFormats.push({ name: 'file:// (two slashes)', uri: twoSlashUri })
+      }
+      
+      // Priority 3: Original URI from database (file:///data/...)
+      // This is the "correct" format but expo-av has a bug with it
+      uriFormats.push({ name: 'Original (file:///data/...)', uri: finalUri })
+      
+      // Priority 4: Try with file:/// prefix (three slashes)
+      if (basePath && basePath.startsWith('/')) {
+        const threeSlashUri = `file:///${basePath}`
+        if (!uriFormats.some(f => f.uri === threeSlashUri)) {
+          uriFormats.push({ name: 'file:/// (three slashes)', uri: threeSlashUri })
+        }
+      }
+      
+      // Priority 5: Workaround - try path without /data (expo-av bug workaround)
+      // expo-av might be stripping /data, so try the path it's actually looking for
+      if (basePath && basePath.startsWith('/data/')) {
+        const withoutData = basePath.replace(/^\/data/, '')
+        if (withoutData !== basePath) {
+          uriFormats.push({ name: 'Workaround: /user/0/... (no /data)', uri: withoutData })
+          uriFormats.push({ name: 'Workaround: file:///user/0/...', uri: `file://${withoutData}` })
+        }
+      }
+      
+      console.log('   - Will try', uriFormats.length, 'URI formats:', uriFormats.map(f => f.name))
+
+      // Try creating sound with multiple URI formats
+      let newSound: Audio.Sound | null = null
+      let lastError: any = null
+      let successfulFormat: string | null = null
+      
+      for (const format of uriFormats) {
+        try {
+          console.log(`   - Trying ${format.name}:`, format.uri.substring(0, 60) + '...')
+          const result = await Audio.Sound.createAsync(
+            { uri: format.uri },
+            {
+              shouldPlay: false,
+              isMuted: false,
+              volume: 1.0,
+            },
+          )
+          newSound = result.sound
+          successfulFormat = format.name
+          console.log(`✅ [MeetingDetail] Audio loaded successfully with ${format.name}`)
+          break // Success, stop trying
+        } catch (error: any) {
+          lastError = error
+          console.warn(`⚠️ [MeetingDetail] Failed with ${format.name}:`, error?.message?.substring(0, 100))
+          // Continue to next format
+        }
+      }
+      
+      if (!newSound) {
+        console.error('❌ [MeetingDetail] All URI formats failed')
+        console.error('   - Tried formats:', uriFormats.map(f => f.name).join(', '))
+        console.error('   - Last error:', lastError?.message)
+        throw lastError || new Error('Failed to create audio sound with all URI formats')
+      }
+      
+      console.log(`✅ [MeetingDetail] Successfully loaded audio using: ${successfulFormat}`)
 
       setSound(newSound)
-    } catch (error) {
-      console.error('Error loading audio:', error)
+      setAudioError(null) // Clear error on success
+    } catch (error: any) {
+      const errorMessage = error?.message || 'Unknown error'
+      console.error('❌ [MeetingDetail] Error loading audio:', error)
+      console.error('   - URI:', meeting.local_audio_uri)
+      console.error('   - Error message:', errorMessage)
+      
+      // Provide user-friendly error message
+      if (errorMessage.includes('FileDataSourceException') || errorMessage.includes('not found')) {
+        setAudioError('Audio file not found. The recording may not have been saved correctly.')
+      } else if (errorMessage.includes('permission') || errorMessage.includes('denied')) {
+        setAudioError('Permission denied. Please check app permissions.')
+      } else {
+        setAudioError(`Failed to load audio: ${errorMessage}`)
+      }
     }
   }
 
   const playPause = async () => {
+    // Don't allow playback if there's an error or no sound
+    if (audioError || !sound) {
+      if (!sound && meeting && meeting.local_audio_uri) {
+        // Try to load sound first
+        await loadSound()
+        // Wait a moment for sound to load
+        await new Promise(resolve => setTimeout(resolve, 200))
+        if (!sound || audioError) {
+          return // Still can't load
+        }
+      } else {
+        return // Can't play
+      }
+    }
+
     // CRITICAL: Always check current state, not cached ref
     // The ref might be stale if user just navigated to this screen
     const currentAppState = AppState.currentState
@@ -139,8 +464,12 @@ export function MeetingDetailScreen({ meetingId, onNavigate }: MeetingDetailScre
       setTimeout(async () => {
         try {
           // Double-check app state before playing
-          if (AppState.currentState === 'active' && sound) {
-            await sound.playAsync()
+          // Get current sound from ref (updated by loadSound)
+          const currentSound = soundRef.current
+          if (AppState.currentState === 'active' && currentSound && !audioError) {
+            if (typeof currentSound.playAsync === 'function') {
+              await currentSound.playAsync()
+            }
           } else {
             console.warn('App is not active, cannot play audio')
             Alert.alert(
@@ -270,11 +599,16 @@ export function MeetingDetailScreen({ meetingId, onNavigate }: MeetingDetailScre
     return date.toLocaleString()
   }
 
+  const handleBack = async () => {
+    await cleanupAudio()
+    onNavigate('home')
+  }
+
   if (!meeting) {
     return (
       <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
         <View style={styles.header}>
-          <Button variant="ghost" size="icon" onPress={() => onNavigate('home')}>
+          <Button variant="ghost" size="icon" onPress={handleBack}>
             <Ionicons name="arrow-back" size={20} color={Colors.foreground} />
           </Button>
           <Text style={styles.headerTitle}>Meeting Details</Text>
@@ -291,18 +625,56 @@ export function MeetingDetailScreen({ meetingId, onNavigate }: MeetingDetailScre
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
       {/* Header */}
       <View style={styles.header}>
-        <Button variant="ghost" size="icon" onPress={() => onNavigate('home')}>
+        <Button variant="ghost" size="icon" onPress={handleBack}>
           <Ionicons name="arrow-back" size={20} color={Colors.foreground} />
         </Button>
         <Text style={styles.headerTitle}>Meeting Details</Text>
-        <View style={styles.headerSpacer} />
+        <Button variant="ghost" size="icon" onPress={handleDeleteMeeting}>
+          <Ionicons name="trash-outline" size={20} color={Colors.destructive} />
+        </Button>
       </View>
 
       {/* Content */}
       <View style={styles.content}>
         {/* Meeting Info */}
         <Card style={styles.infoCard}>
-          <Text style={styles.title}>{meeting.title}</Text>
+          <View style={styles.titleContainer}>
+            {isEditingTitle ? (
+              <View style={styles.editTitleContainer}>
+                <Input
+                  value={editedTitle}
+                  onChangeText={setEditedTitle}
+                  style={styles.titleInput}
+                  autoFocus
+                />
+                <View style={styles.editButtons}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onPress={handleCancelEdit}
+                    disabled={isSaving}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    size="sm"
+                    onPress={handleSaveTitle}
+                    loading={isSaving}
+                    disabled={isSaving}
+                  >
+                    Save
+                  </Button>
+                </View>
+              </View>
+            ) : (
+              <View style={styles.titleRow}>
+                <Text style={styles.title}>{meeting.title}</Text>
+                <Button variant="ghost" size="icon-sm" onPress={handleEditTitle}>
+                  <Ionicons name="pencil-outline" size={16} color={Colors.foreground} />
+                </Button>
+              </View>
+            )}
+          </View>
           <View style={styles.metaRow}>
             <View style={styles.metaItem}>
               <Ionicons name="time-outline" size={16} color={Colors.mutedForeground} />
@@ -329,29 +701,47 @@ export function MeetingDetailScreen({ meetingId, onNavigate }: MeetingDetailScre
             <Text style={styles.playerTitle}>Audio Recording</Text>
           </View>
 
-          <View style={styles.playerControls}>
-            <Button size="lg" onPress={playPause} style={styles.playButton}>
-              <Ionicons
-                name={isPlaying ? 'pause' : 'play'}
-                size={32}
-                color={Colors.primaryForeground}
-              />
-            </Button>
-          </View>
-
-          {duration > 0 && (
-            <View style={styles.progressContainer}>
-              <Text style={styles.timeText}>{formatTime(playbackPosition)}</Text>
-              <View style={styles.progressBar}>
-                <View
-                  style={[
-                    styles.progressFill,
-                    { width: `${(playbackPosition / duration) * 100}%` },
-                  ]}
-                />
-              </View>
-              <Text style={styles.timeText}>{formatTime(duration)}</Text>
+          {audioError ? (
+            <View style={styles.errorContainer}>
+              <Ionicons name="alert-circle" size={32} color={Colors.destructive} />
+              <Text style={styles.errorText}>{audioError}</Text>
+              <Button size="sm" variant="outline" onPress={loadSound} style={styles.retryButton}>
+                <Ionicons name="refresh" size={16} color={Colors.foreground} />
+                <Text style={styles.retryButtonText}>Retry</Text>
+              </Button>
             </View>
+          ) : (
+            <>
+              <View style={styles.playerControls}>
+                <Button 
+                  size="lg" 
+                  onPress={playPause} 
+                  style={styles.playButton}
+                  disabled={!sound || audioError !== null}
+                >
+                  <Ionicons
+                    name={isPlaying ? 'pause' : 'play'}
+                    size={32}
+                    color={Colors.primaryForeground}
+                  />
+                </Button>
+              </View>
+
+              {duration > 0 && (
+                <View style={styles.progressContainer}>
+                  <Text style={styles.timeText}>{formatTime(playbackPosition)}</Text>
+                  <View style={styles.progressBar}>
+                    <View
+                      style={[
+                        styles.progressFill,
+                        { width: `${(playbackPosition / duration) * 100}%` },
+                      ]}
+                    />
+                  </View>
+                  <Text style={styles.timeText}>{formatTime(duration)}</Text>
+                </View>
+              )}
+            </>
           )}
         </Card>
 
@@ -390,6 +780,28 @@ const styles = StyleSheet.create({
   },
   headerSpacer: {
     width: 40,
+  },
+  titleContainer: {
+    marginBottom: 16,
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  editTitleContainer: {
+    gap: 12,
+  },
+  titleInput: {
+    fontSize: 24,
+    fontWeight: '500',
+    height: 44,
+  },
+  editButtons: {
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'flex-end',
   },
   content: {
     paddingHorizontal: 24,
@@ -500,5 +912,26 @@ const styles = StyleSheet.create({
     color: Colors.mutedForeground,
     textAlign: 'center',
     padding: 16,
+  },
+  errorContainer: {
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 16,
+  },
+  errorText: {
+    fontSize: 14,
+    color: Colors.destructive,
+    textAlign: 'center',
+    paddingHorizontal: 16,
+  },
+  retryButton: {
+    marginTop: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  retryButtonText: {
+    fontSize: 14,
+    color: Colors.foreground,
   },
 })

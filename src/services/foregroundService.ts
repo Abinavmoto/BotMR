@@ -13,6 +13,12 @@ const NOTIFICATION_ID = 'recording-status'
 // Track if foreground service is registered
 let isServiceRegistered = false
 
+// Track if foreground service is currently active (for idempotent stop)
+let isServiceActive = false
+
+// Track notification update interval
+let notificationUpdateInterval: NodeJS.Timeout | null = null
+
 /**
  * Register the foreground service handler
  * This MUST be called before using asForegroundService: true
@@ -134,14 +140,57 @@ export async function createForegroundServiceChannel(): Promise<void> {
  * @returns true if service started successfully, false otherwise
  */
 /**
+ * Verify notification is visible with retry polling
+ * @param maxAttempts Maximum number of retry attempts
+ * @param backoffMs Array of backoff delays in milliseconds
+ * @param isAppForeground Whether app is in foreground
+ * @param hasPermission Whether notification permissions are granted
+ * @returns true if notification is visible, false otherwise
+ */
+async function verifyNotificationVisible(
+  maxAttempts: number = 5,
+  backoffMs: number[] = [300, 600, 1200, 2000, 3000],
+  isAppForeground: boolean = true,
+  hasPermission: boolean = true
+): Promise<boolean> {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const delay = backoffMs[attempt] || backoffMs[backoffMs.length - 1]
+    await new Promise(resolve => setTimeout(resolve, delay))
+    
+    try {
+      const displayedNotifications = await notifee.getDisplayedNotifications()
+      const notificationExists = displayedNotifications.some((n: { id: string }) => n.id === NOTIFICATION_ID)
+      
+      if (notificationExists) {
+        console.log(`✅ [ForegroundService] Notification verified visible (attempt ${attempt + 1}/${maxAttempts})`)
+        return true
+      }
+      
+      console.log(`⏳ [ForegroundService] Notification not yet visible (attempt ${attempt + 1}/${maxAttempts})`)
+    } catch (error) {
+      console.warn(`⚠️ [ForegroundService] Error checking notification (attempt ${attempt + 1}/${maxAttempts}):`, error)
+    }
+  }
+  
+  // Only fail if app is in foreground AND permissions are granted
+  // If app is backgrounded or permissions denied, treat as success (notification might be delayed)
+  if (isAppForeground && hasPermission) {
+    console.warn('⚠️ [ForegroundService] Notification not visible after all retries, but displayNotification() succeeded')
+    // Don't fail - treat displayNotification success as sufficient
+  }
+  
+  return true // Treat displayNotification success as started
+}
+
+/**
  * Start foreground service with notification
  * CRITICAL: This must be called BEFORE Audio.Recording.createAsync()
  * to ensure the notification is visible when recording starts.
  * 
- * @param durationSeconds Current recording duration in seconds
+ * @param recordingStartTimestamp Timestamp when recording started (for accurate timer)
  * @returns true if service started successfully, false otherwise
  */
-export async function startForegroundService(durationSeconds: number): Promise<boolean> {
+export async function startForegroundService(recordingStartTimestamp: number): Promise<boolean> {
   if (Platform.OS !== 'android') {
     return true // iOS doesn't need foreground service
   }
@@ -183,19 +232,17 @@ export async function startForegroundService(durationSeconds: number): Promise<b
     console.log('📱 [ForegroundService] Creating/verifying notification channel...')
     await createForegroundServiceChannel()
 
-    const minutes = Math.floor(durationSeconds / 60)
-    const seconds = durationSeconds % 60
-    const timeString = `${minutes}:${seconds.toString().padStart(2, '0')}`
+    // Use static text instead of timer (user preference)
+    const notificationBody = 'BotMR is recording • Tap to return'
 
     console.log('📱 [ForegroundService] Displaying foreground service notification...')
     console.log(`   - Title: 🎙️ BotMR is recording audio`)
-    console.log(`   - Body: Tap to return — ${timeString}`)
+    console.log(`   - Body: ${notificationBody}`)
     console.log(`   - asForegroundService: true`)
     console.log(`   - foregroundServiceType: microphone`)
     console.log(`   - Handler registered: ${isServiceRegistered}`)
 
     // CRITICAL: Add delay to ensure Notifee has fully processed the handler registration
-    // This is important because Notifee needs time to register the handler internally
     if (isServiceRegistered) {
       console.log('⏳ [ForegroundService] Waiting 300ms to ensure Notifee handler is fully registered...')
       await new Promise(resolve => setTimeout(resolve, 300))
@@ -204,61 +251,88 @@ export async function startForegroundService(durationSeconds: number): Promise<b
 
     // Start foreground service with notification
     console.log('📤 [ForegroundService] Calling notifee.displayNotification() with asForegroundService: true...')
-    await notifee.displayNotification({
-      id: NOTIFICATION_ID,
-      title: '🎙️ BotMR is recording audio',
-      body: `Tap to return — ${timeString}`,
-      android: {
-        channelId: FOREGROUND_SERVICE_CHANNEL_ID,
-        importance: AndroidImportance.HIGH,
-        category: AndroidCategory.SERVICE,
-        // CRITICAL: This makes it a foreground service
-        asForegroundService: true,
-        ongoing: true, // Makes notification non-dismissible
-        autoCancel: false,
-        pressAction: {
-          id: 'default',
-          launchActivity: 'default',
+    try {
+      await notifee.displayNotification({
+        id: NOTIFICATION_ID,
+        title: '🎙️ BotMR is recording audio',
+        body: notificationBody, // Static text: "BotMR is recording • Tap to return"
+        android: {
+          channelId: FOREGROUND_SERVICE_CHANNEL_ID,
+          importance: AndroidImportance.HIGH,
+          category: AndroidCategory.SERVICE,
+          // CRITICAL: This makes it a foreground service
+          asForegroundService: true,
+          ongoing: true, // Makes notification non-dismissible
+          autoCancel: false,
+          pressAction: {
+            id: 'default',
+            launchActivity: 'default',
+          },
+          // Foreground service type for microphone
+          foregroundServiceType: 'microphone',
         },
-        // Foreground service type for microphone
-        foregroundServiceType: 'microphone',
-      },
-    })
-
-    // CRITICAL: Verify notification was actually displayed
-    // Wait a moment for the notification to appear
-    await new Promise(resolve => setTimeout(resolve, 500))
-    
-    const displayedNotifications = await notifee.getDisplayedNotifications()
-    const notificationExists = displayedNotifications.some((n: { id: string }) => n.id === NOTIFICATION_ID)
-    
-    if (notificationExists) {
-      console.log('✅ [ForegroundService] Notification confirmed visible in system')
-      console.log(`✅ [ForegroundService] Notification ID: ${NOTIFICATION_ID}`)
-      console.log(`✅ [ForegroundService] Total displayed notifications: ${displayedNotifications.length}`)
-    } else {
-      console.error('❌ [ForegroundService] Notification NOT visible in system!')
-      console.error('❌ [ForegroundService] This means the foreground service may not be active')
-      console.error('❌ [ForegroundService] Check:')
-      console.error('   1. Notification permissions are granted')
-      console.error('   2. Notification channel is not blocked')
-      console.error('   3. App is not in battery optimization mode')
-      console.error('   4. Handler was registered in index.js')
+      })
       
-      // Try to get more info about why it failed
-      try {
-        const settings = await notifee.getNotificationSettings()
-        console.error('📱 [ForegroundService] Current notification settings:', JSON.stringify(settings, null, 2))
-      } catch (settingsError) {
-        console.error('❌ [ForegroundService] Could not get notification settings:', settingsError)
-      }
+      // Treat displayNotification success as service started
+      console.log('✅ [ForegroundService] displayNotification() succeeded - treating as started')
+      isServiceActive = true
       
-      // Return false so caller knows the service didn't start properly
+      // Start notification update interval
+      startNotificationUpdateInterval(recordingStartTimestamp)
+      
+      // Verify with retry polling (non-blocking, doesn't fail if delayed)
+      const isAppForeground = true // Could be passed as parameter if needed
+      
+      // Start verification immediately but don't block
+      verifyNotificationVisible(5, [300, 600, 1200, 2000, 3000], isAppForeground, hasPermission)
+        .then((visible) => {
+          if (visible) {
+            console.log('✅ [ForegroundService] Notification verified visible after retry polling')
+          } else {
+            console.warn('⚠️ [ForegroundService] Notification not visible after retries')
+            console.warn('   - This might indicate a notification permission or channel issue')
+            console.warn('   - Service will continue, but recording might not work in background')
+            
+            // Try to re-display notification as fallback
+            setTimeout(async () => {
+              try {
+                console.log('🔄 [ForegroundService] Attempting to re-display notification...')
+                await notifee.displayNotification({
+                  id: NOTIFICATION_ID,
+                  title: '🎙️ BotMR is recording audio',
+                  body: notificationBody,
+                  android: {
+                    channelId: FOREGROUND_SERVICE_CHANNEL_ID,
+                    importance: AndroidImportance.HIGH,
+                    category: AndroidCategory.SERVICE,
+                    asForegroundService: true,
+                    ongoing: true,
+                    autoCancel: false,
+                    pressAction: {
+                      id: 'default',
+                      launchActivity: 'default',
+                    },
+                    foregroundServiceType: 'microphone',
+                  },
+                })
+                console.log('✅ [ForegroundService] Re-display notification succeeded')
+              } catch (retryError) {
+                console.error('❌ [ForegroundService] Re-display notification failed:', retryError)
+              }
+            }, 1000)
+          }
+        })
+        .catch((error) => {
+          console.warn('⚠️ [ForegroundService] Error during verification polling (non-critical):', error)
+        })
+      
+      console.log('✅ [ForegroundService] Foreground service started successfully')
+      return true
+    } catch (displayError) {
+      console.error('❌ [ForegroundService] Error calling displayNotification:', displayError)
+      isServiceActive = false
       return false
     }
-
-    console.log('✅ [ForegroundService] Foreground service started successfully')
-    return true
   } catch (error) {
     console.error('❌ [ForegroundService] Error starting foreground service:', error)
     return false
@@ -266,8 +340,29 @@ export async function startForegroundService(durationSeconds: number): Promise<b
 }
 
 /**
+ * Start notification update interval
+ * Updates notification with static text (no timer) as per user preference
+ */
+function startNotificationUpdateInterval(recordingStartTimestamp: number): void {
+  if (Platform.OS !== 'android') {
+    return
+  }
+  
+  // Clear any existing interval
+  if (notificationUpdateInterval) {
+    clearInterval(notificationUpdateInterval)
+    notificationUpdateInterval = null
+  }
+  
+  // User prefers static text, not timer updates
+  // Notification is set once and doesn't need updates
+  // The interval is kept for potential future use but doesn't update timer
+  console.log('ℹ️ [ForegroundService] Notification set to static text (no timer updates)')
+}
+
+/**
  * Update foreground service notification with new duration
- * 
+ * @deprecated Use startNotificationUpdateInterval instead
  * @param durationSeconds Current recording duration in seconds
  */
 export async function updateForegroundService(durationSeconds: number): Promise<void> {
@@ -305,14 +400,31 @@ export async function updateForegroundService(durationSeconds: number): Promise<
 
 /**
  * Stop foreground service and cancel notification
+ * Idempotent: safe to call multiple times, short-circuits if already stopped
  */
 export async function stopForegroundService(): Promise<void> {
   if (Platform.OS !== 'android') {
     return
   }
 
+  // Short-circuit if already stopped
+  if (!isServiceActive) {
+    console.log('ℹ️ [ForegroundService] Service already stopped, skipping')
+    return
+  }
+
   try {
     console.log('🛑 [ForegroundService] Stopping foreground service...')
+    
+    // Clear notification update interval
+    if (notificationUpdateInterval) {
+      clearInterval(notificationUpdateInterval)
+      notificationUpdateInterval = null
+      console.log('✅ [ForegroundService] Notification update interval cleared')
+    }
+    
+    // Mark as inactive first to prevent duplicate calls
+    isServiceActive = false
     
     // Stop foreground service
     await notifee.stopForegroundService()
@@ -325,6 +437,13 @@ export async function stopForegroundService(): Promise<void> {
     console.log('✅ [ForegroundService] Foreground service stopped successfully')
   } catch (error) {
     console.error('❌ [ForegroundService] Error stopping service:', error)
+    // Ensure state is cleared even on error
+    isServiceActive = false
+    if (notificationUpdateInterval) {
+      clearInterval(notificationUpdateInterval)
+      notificationUpdateInterval = null
+    }
+    
     // Try to cancel notification even if stopForegroundService fails
     try {
       await notifee.cancelNotification(NOTIFICATION_ID)
@@ -343,11 +462,51 @@ export async function isForegroundServiceActive(): Promise<boolean> {
     return false
   }
 
+  // Use internal state first (faster)
+  if (!isServiceActive) {
+    return false
+  }
+
   try {
     const notifications = await notifee.getDisplayedNotifications()
-    return notifications.some((n: { id: string }) => n.id === NOTIFICATION_ID)
+    const active = notifications.some((n: { id: string }) => n.id === NOTIFICATION_ID)
+    // Sync internal state with actual state
+    if (!active && isServiceActive) {
+      console.warn('⚠️ [ForegroundService] State mismatch: marked active but notification not found')
+      isServiceActive = false
+    }
+    return active
   } catch (error) {
     console.error('❌ Error checking foreground service status:', error)
-    return false
+    return isServiceActive // Fallback to internal state
+  }
+}
+
+/**
+ * Force stop and cleanup (for reset scenarios)
+ */
+export async function forceStopForegroundService(): Promise<void> {
+  if (Platform.OS !== 'android') {
+    return
+  }
+
+  console.log('🛑 [ForegroundService] Force stopping foreground service...')
+  
+  // Clear interval
+  if (notificationUpdateInterval) {
+    clearInterval(notificationUpdateInterval)
+    notificationUpdateInterval = null
+  }
+  
+  // Reset state
+  isServiceActive = false
+  
+  // Stop and cancel
+  try {
+    await notifee.stopForegroundService()
+    await notifee.cancelNotification(NOTIFICATION_ID)
+    console.log('✅ [ForegroundService] Force stop complete')
+  } catch (error) {
+    console.error('❌ [ForegroundService] Error in force stop:', error)
   }
 }

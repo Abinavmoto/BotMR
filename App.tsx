@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { StyleSheet, StatusBar, Platform } from 'react-native'
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context'
+import { Audio } from 'expo-av'
 import { HomeScreen } from './components/home-screen'
 import { RecordingScreen } from './components/recording-screen'
 import { ProcessingScreen } from './components/processing-screen'
@@ -19,8 +20,12 @@ interface NavigationState {
   meetingId?: string
 }
 
+// Permission state type
+type PermissionStatus = 'granted' | 'denied' | 'undetermined' | null
+
 export default function App() {
   const [navigationState, setNavigationState] = useState<NavigationState>({ screen: 'home' })
+  const [permissionStatus, setPermissionStatus] = useState<PermissionStatus>(null)
 
   useEffect(() => {
     // Initialize database on app start
@@ -28,9 +33,22 @@ export default function App() {
       console.error('Failed to initialize database:', error)
     })
 
+    // Check permissions on startup (don't request yet)
+    checkInitialPermissions()
+
     // Note: Foreground service handler is registered in index.js (app entry point)
     // No need to register here - it's already registered globally before App component loads
   }, [])
+
+  const checkInitialPermissions = async () => {
+    try {
+      const { status } = await Audio.getPermissionsAsync()
+      setPermissionStatus(status === 'granted' ? 'granted' : 'undetermined')
+    } catch (error) {
+      console.error('Error checking permissions on startup:', error)
+      setPermissionStatus('undetermined')
+    }
+  }
 
   const handleNavigate = (screen: Screen, meetingId?: string) => {
     setNavigationState({ screen, meetingId })
@@ -41,7 +59,7 @@ export default function App() {
       case 'home':
         return <HomeScreen onNavigate={handleNavigate} />
       case 'recording':
-        return <RecordingScreen onNavigate={handleNavigate} />
+        return <RecordingScreen onNavigate={handleNavigate} permissionStatus={permissionStatus} onPermissionStatusChange={setPermissionStatus} />
       case 'processing':
         return <ProcessingScreen onNavigate={handleNavigate} />
       case 'summary':

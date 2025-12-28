@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
 import { Colors } from '@/constants/Colors'
 import { MeetingRepository, Meeting } from '@/src/db/MeetingRepository'
 import { openDatabase } from '@/src/db/database'
@@ -13,11 +14,15 @@ interface HomeScreenProps {
   onNavigate: NavigationHandler
 }
 
+type DateFilter = 'all' | 'today' | 'this-week' | 'this-month'
+
 export function HomeScreen({ onNavigate }: HomeScreenProps) {
   const [meetings, setMeetings] = useState<Meeting[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [showRecoveryBanner, setShowRecoveryBanner] = useState(false)
   const [recentPartialMeeting, setRecentPartialMeeting] = useState<Meeting | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [dateFilter, setDateFilter] = useState<DateFilter>('all')
 
   useEffect(() => {
     loadMeetings()
@@ -84,6 +89,50 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
     if (diffDays < 7) return `${diffDays}d ago`
     return date.toLocaleDateString()
   }
+
+  const filteredMeetings = useMemo(() => {
+    let filtered = [...meetings]
+
+    // Apply search filter
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase().trim()
+      filtered = filtered.filter((meeting) =>
+        meeting.title.toLowerCase().includes(query)
+      )
+    }
+
+    // Apply date filter
+    if (dateFilter !== 'all') {
+      let cutoffTime = 0
+
+      switch (dateFilter) {
+        case 'today': {
+          const today = new Date()
+          cutoffTime = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime()
+          break
+        }
+        case 'this-week': {
+          const today = new Date()
+          const dayOfWeek = today.getDay()
+          const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1
+          const monday = new Date(today)
+          monday.setDate(today.getDate() - daysToMonday)
+          monday.setHours(0, 0, 0, 0)
+          cutoffTime = monday.getTime()
+          break
+        }
+        case 'this-month': {
+          const now = new Date()
+          cutoffTime = new Date(now.getFullYear(), now.getMonth(), 1).getTime()
+          break
+        }
+      }
+
+      filtered = filtered.filter((meeting) => meeting.created_at >= cutoffTime)
+    }
+
+    return filtered
+  }, [meetings, searchQuery, dateFilter])
 
   const getStatusConfig = (status: Meeting['status']) => {
     switch (status) {
@@ -160,7 +209,48 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
       </View>
 
       <View style={styles.recentSection}>
-        <Text style={styles.sectionTitle}>Recent Meetings</Text>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Recent Meetings</Text>
+        </View>
+
+        {/* Search Bar */}
+        <View style={styles.searchContainer}>
+          <Ionicons name="search-outline" size={20} color={Colors.mutedForeground} style={styles.searchIcon} />
+          <Input
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            placeholder="Search meetings..."
+            style={styles.searchInput}
+          />
+          {searchQuery.length > 0 && (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onPress={() => setSearchQuery('')}
+            >
+              <Ionicons name="close-circle" size={20} color={Colors.mutedForeground} />
+            </Button>
+          )}
+        </View>
+
+        {/* Date Filter */}
+        <View style={styles.filterContainer}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterScroll}>
+            {(['all', 'today', 'this-week', 'this-month'] as DateFilter[]).map((filter) => (
+              <Button
+                key={filter}
+                variant={dateFilter === filter ? 'default' : 'outline'}
+                size="sm"
+                onPress={() => setDateFilter(filter)}
+                style={styles.filterButton}
+              >
+                <Text style={dateFilter === filter ? styles.filterTextActive : styles.filterText}>
+                  {filter === 'all' ? 'All Time' : filter === 'today' ? 'Today' : filter === 'this-week' ? 'This Week' : 'This Month'}
+                </Text>
+              </Button>
+            ))}
+          </ScrollView>
+        </View>
 
         {/* Recovery Banner for Partial Recordings */}
         {showRecoveryBanner && recentPartialMeeting && (
@@ -193,12 +283,16 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
           <Card>
             <Text style={styles.loadingText}>Loading meetings...</Text>
         </Card>
-        ) : meetings.length === 0 ? (
+        ) : filteredMeetings.length === 0 ? (
           <Card>
-            <Text style={styles.emptyText}>No meetings yet. Start recording to create your first meeting!</Text>
+            <Text style={styles.emptyText}>
+              {meetings.length === 0
+                ? 'No meetings yet. Start recording to create your first meeting!'
+                : 'No meetings match your search or filter criteria.'}
+            </Text>
         </Card>
         ) : (
-          meetings.slice(0, 5).map((meeting) => {
+          filteredMeetings.slice(0, 5).map((meeting) => {
             const statusConfig = getStatusConfig(meeting.status)
             return (
               <TouchableOpacity
@@ -299,13 +393,48 @@ const styles = StyleSheet.create({
   recentSection: {
     gap: 16,
   },
+  sectionHeader: {
+    marginBottom: 4,
+  },
   sectionTitle: {
     fontSize: 12,
     fontWeight: '500',
     textTransform: 'uppercase',
     letterSpacing: 1,
     color: Colors.mutedForeground,
-    marginBottom: 4,
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    gap: 8,
+  },
+  searchIcon: {
+    position: 'absolute',
+    left: 12,
+    zIndex: 1,
+  },
+  searchInput: {
+    flex: 1,
+    paddingLeft: 40,
+  },
+  filterContainer: {
+    marginBottom: 16,
+  },
+  filterScroll: {
+    gap: 8,
+    paddingRight: 24,
+  },
+  filterButton: {
+    marginRight: 8,
+  },
+  filterText: {
+    fontSize: 12,
+    color: Colors.foreground,
+  },
+  filterTextActive: {
+    fontSize: 12,
+    color: Colors.primaryForeground,
   },
   cardContent: {
     flexDirection: 'row',

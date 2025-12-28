@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, AppState, AppStateStatus, Platform, Linking } from 'react-native'
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, AppState, AppStateStatus, Platform, Linking, ActivityIndicator } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { Audio } from 'expo-av'
 import * as Crypto from 'expo-crypto'
@@ -8,6 +8,7 @@ import { Card } from '@/components/ui/card'
 import { Colors } from '@/constants/Colors'
 import { MeetingRepository } from '@/src/db/MeetingRepository'
 import { saveRecordingToPermanentLocation, configureAudioModeForRecording, resetAudioMode } from '@/src/services/audioService'
+import * as FileSystem from 'expo-file-system/legacy'
 import {
   showRecordingNotification,
   updateRecordingNotification,
@@ -16,45 +17,101 @@ import {
 } from '@/src/services/notificationService'
 import {
   startForegroundService,
-  updateForegroundService,
   stopForegroundService,
   isForegroundServiceActive,
   createForegroundServiceChannel,
   registerForegroundServiceHandler,
 } from '@/src/services/foregroundService'
+import { useRecordingController } from '@/src/hooks/useRecordingController'
 import { NavigationHandler } from '@/src/types/navigation'
+
+type PermissionStatus = 'granted' | 'denied' | 'undetermined' | null
 
 interface RecordingScreenProps {
   onNavigate: NavigationHandler
+  permissionStatus?: PermissionStatus
+  onPermissionStatusChange?: (status: PermissionStatus) => void
 }
 
-export function RecordingScreen({ onNavigate }: RecordingScreenProps) {
-  const [durationMillis, setDurationMillis] = useState(0)
-  const [isPaused, setIsPaused] = useState(false)
-  const [isRecording, setIsRecording] = useState(false)
+export function RecordingScreen({ onNavigate, permissionStatus: propPermissionStatus, onPermissionStatusChange }: RecordingScreenProps) {
   const [showBackgroundNotice, setShowBackgroundNotice] = useState(true)
   const [isBackgroundRecording, setIsBackgroundRecording] = useState(false)
   const [interruptionMessage, setInterruptionMessage] = useState<string | null>(null)
-  const [recording, setRecording] = useState<Audio.Recording | null>(null)
   const [hasPermission, setHasPermission] = useState<boolean | null>(null)
-  const [foregroundServiceActive, setForegroundServiceActive] = useState(false) // Track if foreground service notification is active
+  // Use prop permission status if provided, otherwise use local state
+  const permissionStatus = propPermissionStatus !== undefined ? propPermissionStatus : (hasPermission === true ? 'granted' : hasPermission === false ? 'denied' : 'undetermined')
   const [preBackgroundWarning, setPreBackgroundWarning] = useState(false) // Show warning before going to background
+  const [foregroundServiceActive, setForegroundServiceActive] = useState(false)
+  const [durationMillis, setDurationMillis] = useState(0)
+  const [isPaused, setIsPaused] = useState(false)
+  const [isRecording, setIsRecording] = useState(false)
+  const [recording, setRecording] = useState<Audio.Recording | null>(null)
+  const [showSavedToast, setShowSavedToast] = useState(false)
+  
   const recordingRef = useRef<Audio.Recording | null>(null)
   const statusIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const interruptionCheckRef = useRef<NodeJS.Timeout | null>(null)
   const appStateRef = useRef<AppStateStatus>(AppState.currentState)
   const handleInterruptionRef = useRef(false)
-  const startTimeRef = useRef<number | null>(null) // Track when recording started for fallback timer
-  const foregroundServiceNotificationIdRef = useRef<string | null>(null) // Track notification ID
+  const startTimeRef = useRef<number | null>(null)
+  const foregroundServiceNotificationIdRef = useRef<string | null>(null)
+  
+  // Use recording controller hook with state machine
+  const recordingController = useRecordingController({
+    onStateChange: (newState) => {
+      console.log(`[RecordingScreen] Recording state changed to: ${newState}`)
+      // Update UI state based on recording state
+      if (newState === 'RECORDING') {
+        setIsBackgroundRecording(false)
+        setIsRecording(true)
+      } else if (newState === 'IDLE' || newState === 'FAILED') {
+        setIsBackgroundRecording(false)
+        setIsRecording(false)
+      }
+    },
+    onError: (error) => {
+      console.error('[RecordingScreen] Recording error:', error)
+      Alert.alert('Recording Error', error.message || 'An error occurred during recording')
+    },
+  })
+  
+  // Derive UI state from controller
+  const recordingState = recordingController.state
+  const isStarting = recordingState === 'STARTING'
+  const isStopping = recordingState === 'STOPPING'
+  const isFailed = recordingState === 'FAILED'
+  
+  // Sync controller state with local state
+  useEffect(() => {
+    if (recordingController.recording) {
+      recordingRef.current = recordingController.recording
+      setRecording(recordingController.recording)
+    } else if (recordingController.state === 'IDLE' || recordingController.state === 'FAILED') {
+      // Clear ref when not recording
+      recordingRef.current = null
+      setRecording(null)
+    }
+    if (recordingController.durationMillis !== undefined) {
+      setDurationMillis(recordingController.durationMillis)
+    }
+    setIsPaused(recordingController.isPaused)
+  }, [recordingController.recording, recordingController.durationMillis, recordingController.isPaused, recordingController.state])
 
   useEffect(() => {
-    requestPermissions()
+    // Don't auto-request permissions on mount
+    // Only check if we have permission status from props
+    if (propPermissionStatus === 'granted') {
+      setHasPermission(true)
+    } else if (propPermissionStatus === 'denied') {
+      setHasPermission(false)
+    }
+    
     // Note: Foreground service handler is registered in App.tsx on app startup
     // No need to register here - it's already registered globally
     return () => {
       cleanup()
     }
-  }, [])
+  }, [propPermissionStatus])
 
   // Track app state changes for background recording detection
   useEffect(() => {
@@ -91,9 +148,11 @@ export function RecordingScreen({ onNavigate }: RecordingScreenProps) {
           if (recordingRef.current) {
             try {
               const status = await recordingRef.current.getStatusAsync()
-              if (status.isLoaded) {
+              // Check if status has recording info
+              if ('isRecording' in status || 'durationMillis' in status) {
                 // CRITICAL: If recording stopped, try to restart it immediately
-                if (!status.isRecording && !isPaused) {
+                const isCurrentlyRecording = 'isRecording' in status ? status.isRecording : false
+                if (!isCurrentlyRecording && !isPaused) {
                   const actualDuration = status.durationMillis || 0
                   const timerDuration = currentDuration
                   const difference = Math.abs(timerDuration - actualDuration)
@@ -132,7 +191,7 @@ export function RecordingScreen({ onNavigate }: RecordingScreenProps) {
                       handleInterruption('Recording stopped unexpectedly. Saving available audio...')
                     }
                   }
-                } else if (status.isRecording && status.durationMillis) {
+                } else if (('isRecording' in status && status.isRecording) && ('durationMillis' in status && status.durationMillis)) {
                   const statusDuration = status.durationMillis
                   // Use status duration if it's reasonable (within 3 seconds of our calculation)
                   const diff = Math.abs(statusDuration - currentDuration)
@@ -162,7 +221,7 @@ export function RecordingScreen({ onNavigate }: RecordingScreenProps) {
               // Update notification every 5 seconds when backgrounded (to avoid spam)
               if (durationSeconds % 5 === 0) {
                 if (Platform.OS === 'android') {
-                  updateForegroundService(durationSeconds).catch(console.error)
+                  // Notification uses static text, no need to update
                 } else {
                   updateRecordingNotification(durationSeconds).catch(console.error)
                 }
@@ -212,7 +271,9 @@ export function RecordingScreen({ onNavigate }: RecordingScreenProps) {
           if (!serviceActive && !foregroundServiceActive) {
             // Foreground service is missing - try to restart it
             console.warn('⚠️ Foreground service not active - attempting to restart')
-            const restarted = await startForegroundService(Math.floor(durationMillis / 1000))
+            // Restart foreground service with current timestamp
+            const currentTimestamp = startTimeRef.current || Date.now()
+            const restarted = await startForegroundService(currentTimestamp)
             
             if (!restarted) {
               // Failed to restart - stop recording safely
@@ -221,7 +282,7 @@ export function RecordingScreen({ onNavigate }: RecordingScreenProps) {
               const uri = recordingRef.current.getURI()
               if (uri) {
                 const status = await recordingRef.current.getStatusAsync()
-                const actualDuration = status.isLoaded ? (status.durationMillis || 0) : durationMillis
+                const actualDuration = ('durationMillis' in status && status.durationMillis) ? status.durationMillis : durationMillis
                 const durationSeconds = Math.max(0, Math.floor(actualDuration / 1000))
                 
                 await stopRecordingInternal()
@@ -284,10 +345,8 @@ export function RecordingScreen({ onNavigate }: RecordingScreenProps) {
         const durationSeconds = Math.floor(durationMillis / 1000)
         if (Platform.OS === 'android') {
           // Update foreground service notification
-          updateForegroundService(durationSeconds).catch((error) => {
-            console.error('❌ Failed to update foreground service notification:', error)
-            // If notification update fails, recording might be at risk
-          })
+          // Notification uses static text, no need to update
+          // Removed updateForegroundService call
         } else {
           showRecordingNotification(durationSeconds).catch(console.error)
         }
@@ -305,8 +364,9 @@ export function RecordingScreen({ onNavigate }: RecordingScreenProps) {
               }
               
               const status = await recordingRef.current.getStatusAsync()
-              if (status.isLoaded) {
-                if (!status.isRecording && !isPaused) {
+              if ('durationMillis' in status || 'isRecording' in status) {
+                const isCurrentlyRecording = 'isRecording' in status ? status.isRecording : false
+                if (!isCurrentlyRecording && !isPaused) {
                   const actualDuration = status.durationMillis || 0
                   console.error('⚠️ Recording stopped when backgrounded!')
                   console.error('Status duration:', actualDuration, 'ms (', Math.floor(actualDuration / 1000), 's)')
@@ -327,13 +387,17 @@ export function RecordingScreen({ onNavigate }: RecordingScreenProps) {
                     // If restart fails, handle as interruption
                     handleInterruption('Recording stopped. Partial audio saved.')
                   }
-                } else if (status.isRecording) {
-                  console.log('✅ Recording confirmed active when backgrounded, duration:', status.durationMillis, 'ms')
+                } else if (('isRecording' in status && status.isRecording) || ('durationMillis' in status && status.durationMillis && status.durationMillis > 0)) {
+                  const statusDuration = 'durationMillis' in status ? status.durationMillis : 0
+                  console.log('✅ Recording confirmed active when backgrounded, duration:', statusDuration, 'ms')
                   // Sync timer with actual recording duration
-                  if (status.durationMillis) {
-                    startTimeRef.current = Date.now() - status.durationMillis
-                    setDurationMillis(status.durationMillis)
+                  if (statusDuration > 0) {
+                    startTimeRef.current = Date.now() - statusDuration
+                    setDurationMillis(statusDuration)
                   }
+                } else {
+                  // Recording might have stopped - log warning but don't interrupt
+                  console.warn('⚠️ Recording status unclear when backgrounded - continuing with timer')
                 }
               }
             }
@@ -369,7 +433,7 @@ export function RecordingScreen({ onNavigate }: RecordingScreenProps) {
         try {
           if (recordingRef.current) {
             const status = await recordingRef.current.getStatusAsync()
-            if (status.isLoaded && status.isRecording) {
+            if (('isRecording' in status && status.isRecording) || ('durationMillis' in status && status.durationMillis)) {
               const statusDuration = status.durationMillis || 0
               // Only use status if it's close to our fallback calculation
               if (startTimeRef.current) {
@@ -421,7 +485,7 @@ export function RecordingScreen({ onNavigate }: RecordingScreenProps) {
           const finalStatus = await recordingRef.current.getStatusAsync()
           let finalDurationMillis = durationMillis
           
-          if (finalStatus.isLoaded && finalStatus.durationMillis) {
+          if ('durationMillis' in finalStatus && finalStatus.durationMillis) {
             finalDurationMillis = finalStatus.durationMillis
           } else if (startTimeRef.current) {
             finalDurationMillis = Date.now() - startTimeRef.current
@@ -511,7 +575,7 @@ export function RecordingScreen({ onNavigate }: RecordingScreenProps) {
       try {
         if (recordingRef.current && !handleInterruptionRef.current) {
           const status = await recordingRef.current.getStatusAsync()
-          if (status.isLoaded) {
+              if ('durationMillis' in status || 'isRecording' in status) {
             // Check if recording stopped unexpectedly
             if (!status.isRecording && !isPaused) {
               handleInterruption('Recording stopped unexpectedly')
@@ -554,6 +618,9 @@ export function RecordingScreen({ onNavigate }: RecordingScreenProps) {
       const { status: currentStatus } = await Audio.getPermissionsAsync()
       if (currentStatus === 'granted') {
         setHasPermission(true)
+        if (onPermissionStatusChange) {
+          onPermissionStatusChange('granted')
+        }
         return true
       }
 
@@ -562,10 +629,16 @@ export function RecordingScreen({ onNavigate }: RecordingScreenProps) {
       const granted = status === 'granted'
       setHasPermission(granted)
       
+      // Update parent permission status
+      if (onPermissionStatusChange) {
+        onPermissionStatusChange(granted ? 'granted' : 'denied')
+      }
+      
       if (!granted) {
+        // Don't auto-redirect to settings - let user choose
         Alert.alert(
           'Microphone Permission Required',
-          'BotMR needs microphone access to record meetings. For background recording, please select "Allow all the time" in the next permission dialog.',
+          'BotMR needs microphone access to record meetings. You can enable it in Settings.',
           [
             { text: 'Cancel', style: 'cancel' },
             {
@@ -599,17 +672,23 @@ export function RecordingScreen({ onNavigate }: RecordingScreenProps) {
     } catch (error) {
       console.error('Error requesting permissions:', error)
       setHasPermission(false)
+      if (onPermissionStatusChange) {
+        onPermissionStatusChange('denied')
+      }
       Alert.alert('Error', 'Failed to request microphone permission.')
       return false
     }
   }
 
   const startRecording = async () => {
-    // Re-check and request permissions if needed
-    if (hasPermission !== true) {
+    // Check permission status - request if not granted
+    const currentPermissionStatus = permissionStatus === 'granted' || hasPermission === true
+    
+    if (!currentPermissionStatus) {
+      // Request permission when user actually wants to record
       const permissionGranted = await requestPermissions()
       if (!permissionGranted) {
-        Alert.alert('Permission Denied', 'Microphone permission is required to record.')
+        // Don't show alert here - requestPermissions already shows one
         return
       }
     }
@@ -628,276 +707,62 @@ export function RecordingScreen({ onNavigate }: RecordingScreenProps) {
       return
     }
 
-    try {
-      // CRITICAL: Reset audio mode first to clear any conflicts
-      try {
-        await Audio.setAudioModeAsync({
-          allowsRecordingIOS: false,
-          playsInSilentModeIOS: false,
-          staysActiveInBackground: false,
-        })
-        await new Promise(resolve => setTimeout(resolve, 300))
-      } catch (resetError) {
-        console.warn('Error resetting audio mode (non-critical):', resetError)
-      }
-
-      // Clean up any existing recording first
-      if (recordingRef.current) {
-        try {
-          const status = await recordingRef.current.getStatusAsync()
-          if (status.isRecording) {
-            await recordingRef.current.stopAndUnloadAsync()
-          } else {
-            await recordingRef.current.unloadAsync()
-          }
-        } catch (cleanupError) {
-          console.warn('Error cleaning up existing recording:', cleanupError)
-        }
-        recordingRef.current = null
-        setRecording(null)
-      }
-
-      // Configure audio mode defensively before recording
-      await configureAudioModeForRecording()
-      
-      // Additional delay after audio mode configuration to ensure session is ready
-      await new Promise(resolve => setTimeout(resolve, 500))
-
-      // CRITICAL: On Android, start foreground service notification BEFORE creating recording
-      // This ensures the notification is visible and the service is active when recording starts
-      if (Platform.OS === 'android') {
-        console.log('📱 [Recording] Starting foreground service notification BEFORE recording creation...')
-        const serviceStarted = await startForegroundService(0)
-        if (!serviceStarted) {
-          // Foreground service failed - cannot record in background
-          console.error('❌ [Recording] Foreground service failed to start - stopping recording')
-          Alert.alert(
-            'Background Recording Unavailable',
-            'Android requires a foreground service to record in background. Please check notification permissions in Settings.',
-            [
-              { text: 'Cancel', style: 'cancel' },
-              {
-                text: 'Open Settings',
-                onPress: () => Linking.openSettings(),
-              },
-            ],
-          )
-          return
-        }
-        console.log('✅ [Recording] Foreground service notification started successfully')
-        foregroundServiceNotificationIdRef.current = 'foreground-service-active'
-        setForegroundServiceActive(true)
-        
-        // Small delay to ensure notification is fully displayed
-        await new Promise(resolve => setTimeout(resolve, 200))
-      }
-
-      // Create new recording with retry logic
-      let newRecording: Audio.Recording
-      let createAttempts = 0
-      const maxAttempts = 3
-      
-      while (createAttempts < maxAttempts) {
-        try {
-          const result = await Audio.Recording.createAsync(
-            Audio.RecordingOptionsPresets.HIGH_QUALITY,
-          )
-          newRecording = result.recording
-          console.log(`Recording created successfully on attempt ${createAttempts + 1}`)
-          break
-        } catch (createError) {
-          createAttempts++
-          console.warn(`Recording creation attempt ${createAttempts} failed:`, createError)
-          
-          if (createAttempts >= maxAttempts) {
-            // All attempts failed
-            console.error('All recording creation attempts failed')
-            throw new Error(
-              'Failed to start recording. The audio session may be in use by another app. ' +
-              'Please close other audio apps and try again.'
-            )
-          }
-          
-          // Wait before retrying
-          await new Promise(resolve => setTimeout(resolve, 500))
-          
-          // Reconfigure audio mode before retry
-          try {
-            await configureAudioModeForRecording()
-            await new Promise(resolve => setTimeout(resolve, 300))
-          } catch (reconfigError) {
-            console.warn('Error reconfiguring audio mode for retry:', reconfigError)
-          }
-        }
-      }
-
-      // Set recording ref immediately - don't wait for status check
-      recordingRef.current = newRecording
-      setRecording(newRecording)
-      setIsRecording(true)
-      setIsPaused(false)
-      setDurationMillis(0)
-      setInterruptionMessage(null)
-      
-      // CRITICAL: Set start time immediately after recording object is created
-      // This ensures accurate duration tracking even if status checks are delayed
-      const recordingStartTime = Date.now()
-      startTimeRef.current = recordingStartTime
-
-      // Verify recording status (non-blocking - don't fail if status is delayed)
-      try {
-        const initialStatus = await newRecording.getStatusAsync()
-        if (initialStatus.isLoaded) {
-          console.log('Recording status verified - isRecording:', initialStatus.isRecording)
-          if (!initialStatus.isRecording) {
-            // Recording object exists but not recording yet - this is OK, it might start automatically
-            console.log('Recording object created but not recording yet - will verify in interval')
-          }
-        } else {
-          console.warn('Recording status not loaded yet - this is OK, will verify in interval')
-        }
-      } catch (statusError) {
-        // Don't fail - status check might be delayed, the periodic interval will catch it
-        console.warn('Initial status check failed (non-critical):', statusError)
-      }
-
-      // Note: Foreground service notification was already started BEFORE recording creation (above)
-      // For iOS, show informational notification
-      if (Platform.OS !== 'android') {
-        showRecordingStoppedNotification('Recording started').catch(console.error)
-      }
-      
-      console.log('Recording started successfully, will continue in background')
-      
-      // Verify recording is actually recording (non-blocking, will retry in interval if needed)
-      setTimeout(async () => {
-        try {
-          if (recordingRef.current) {
-            const verifyStatus = await recordingRef.current.getStatusAsync()
-            if (verifyStatus.isLoaded) {
-              if (!verifyStatus.isRecording && !isPaused) {
-                console.warn('Recording may not have started, attempting to start...')
-                try {
-                  await recordingRef.current.startAsync()
-                  console.log('Recording started successfully after verification')
-                } catch (startError) {
-                  console.error('Failed to start recording after verification:', startError)
-                }
-              } else if (verifyStatus.isRecording) {
-                console.log('Recording confirmed active')
-              }
-            }
-          }
-        } catch (verifyError) {
-          console.warn('Error verifying recording status:', verifyError)
-        }
-      }, 1000) // Check after 1 second to give it time to start
-
-      // Immediately get initial status to start timer (non-blocking)
-      try {
-        const initialStatus = await newRecording.getStatusAsync()
-        if (initialStatus.isLoaded && initialStatus.durationMillis) {
-          // If status has duration, sync our start time to match
-          startTimeRef.current = recordingStartTime - initialStatus.durationMillis
-          setDurationMillis(initialStatus.durationMillis)
-        }
-      } catch (statusError) {
-        console.warn('Error getting initial recording status:', statusError)
-        // Continue with fallback timer - this is fine
-      }
-    } catch (error) {
-      console.error('Failed to start recording:', error)
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
-      Alert.alert(
-        'Recording Error',
-        `Failed to start recording: ${errorMessage}. Please ensure microphone permissions are granted and try again.`,
-      )
+    // Use recording controller to start
+    const started = await recordingController.startRecording()
+    if (!started) {
+      // Error already handled by controller
+      return
     }
+    
+    // Sync local state with controller - wait a moment for recording to be set
+    await new Promise(resolve => setTimeout(resolve, 100))
+    
+    if (recordingController.recording) {
+      recordingRef.current = recordingController.recording
+      setRecording(recordingController.recording)
+      setIsRecording(true)
+    }
+    if (recordingController.recordingStartTimestamp) {
+      startTimeRef.current = recordingController.recordingStartTimestamp
+    }
+    
+    // For iOS, show informational notification
+    if (Platform.OS !== 'android') {
+      showRecordingStoppedNotification('Recording started').catch(console.error)
+    }
+    
+    console.log('Recording started successfully, will continue in background')
   }
 
   const pauseRecording = async () => {
-    try {
-      if (recordingRef.current) {
-        await recordingRef.current.pauseAsync()
-        setIsPaused(true)
-        // Adjust start time ref to account for paused duration
-        if (startTimeRef.current) {
-          const currentDuration = Date.now() - startTimeRef.current
-          startTimeRef.current = Date.now() - currentDuration
-        }
-      }
-    } catch (error) {
-      console.error('Failed to pause recording:', error)
-    }
+    if (!recordingController.canPause) return
+    await recordingController.pauseRecording()
   }
 
   const resumeRecording = async () => {
-    try {
-      if (recordingRef.current) {
-        await recordingRef.current.startAsync()
-        setIsPaused(false)
-        // Adjust start time ref when resuming
-        if (startTimeRef.current) {
-          const currentDuration = Date.now() - startTimeRef.current
-          startTimeRef.current = Date.now() - currentDuration
-        }
-      }
-    } catch (error) {
-      console.error('Failed to resume recording:', error)
-    }
+    if (!recordingController.canResume) return
+    await recordingController.resumeRecording()
+  }
+  
+  const resetRecordingEngine = async () => {
+    await recordingController.resetRecordingEngine()
+    // Clear local state
+    setIsBackgroundRecording(false)
+    setInterruptionMessage(null)
+    setShowBackgroundNotice(true)
   }
 
   const stopRecordingInternal = async () => {
     try {
-      // Stop foreground service on Android
-      if (Platform.OS === 'android') {
-        try {
-          await stopForegroundService()
-          console.log('✅ [stopRecordingInternal] Foreground service stopped')
-        } catch (error) {
-          console.warn('⚠️ [stopRecordingInternal] Error stopping foreground service:', error)
-        }
-      } else {
-        try {
-          await cancelRecordingNotification()
-        } catch (error) {
-          console.warn('⚠️ [stopRecordingInternal] Error canceling notification:', error)
-        }
-      }
+      // Use recording controller to stop (handles foreground service and cleanup)
+      await recordingController.stopRecording()
       
+      // Clear local state
       setForegroundServiceActive(false)
       foregroundServiceNotificationIdRef.current = null
-      
-      // CRITICAL: Stop and unload recording
-      if (recordingRef.current) {
-        try {
-          await recordingRef.current.stopAndUnloadAsync()
-          console.log('✅ [stopRecordingInternal] Recording stopped and unloaded')
-        } catch (error) {
-          console.warn('⚠️ [stopRecordingInternal] Error stopping recording:', error)
-          // Try to unload even if stop fails
-          try {
-            await recordingRef.current.unloadAsync()
-          } catch (unloadError) {
-            console.warn('⚠️ [stopRecordingInternal] Error unloading recording:', unloadError)
-          }
-        }
-        recordingRef.current = null
-        setRecording(null)
-      }
-      
-      // Clear all state
-      setIsRecording(false)
-      setIsPaused(false)
       setIsBackgroundRecording(false)
-      setDurationMillis(0)
-      startTimeRef.current = null
       
-      // Clear any intervals
-      if (statusIntervalRef.current) {
-        clearInterval(statusIntervalRef.current)
-        statusIntervalRef.current = null
-      }
+      // Clear interruption check interval
       if (interruptionCheckRef.current) {
         clearInterval(interruptionCheckRef.current)
         interruptionCheckRef.current = null
@@ -908,15 +773,52 @@ export function RecordingScreen({ onNavigate }: RecordingScreenProps) {
   }
 
   const stopRecording = async () => {
-    if (!recordingRef.current) return
+    // Use recording from controller if available, otherwise use local ref
+    const currentRecording = recordingController.recording || recordingRef.current
+    if (!currentRecording) {
+      console.warn('⚠️ No recording object available to stop')
+      await stopRecordingInternal()
+      await resetAudioMode()
+      onNavigate('home')
+      return
+    }
 
     try {
       setIsRecording(false)
       setIsPaused(false)
 
-      const uri = recordingRef.current.getURI()
-      if (!uri) {
-        Alert.alert('Error', 'No recording data available.')
+      // CRITICAL: Get URI before stopping - once stopped, URI might be invalid
+      let uri: string | null = null
+      try {
+        if (typeof currentRecording.getURI === 'function') {
+          uri = currentRecording.getURI()
+        } else if ('uri' in currentRecording && typeof currentRecording.uri === 'string') {
+          uri = currentRecording.uri
+        }
+        
+        console.log('📹 [RecordingScreen] Got recording URI:', uri)
+        
+        if (!uri) {
+          console.error('❌ [RecordingScreen] No recording URI available')
+          Alert.alert('Error', 'No recording data available.')
+          await stopRecordingInternal()
+          await resetAudioMode()
+          onNavigate('home')
+          return
+        }
+        
+        // Verify URI is valid (not empty, has proper format)
+        if (!uri || uri.trim().length === 0) {
+          console.error('❌ [RecordingScreen] Recording URI is empty')
+          Alert.alert('Error', 'Recording URI is invalid.')
+          await stopRecordingInternal()
+          await resetAudioMode()
+          onNavigate('home')
+          return
+        }
+      } catch (uriError) {
+        console.error('❌ [RecordingScreen] Error getting recording URI:', uriError)
+        Alert.alert('Error', 'Failed to get recording URI. The recording may not have been saved correctly.')
         await stopRecordingInternal()
         await resetAudioMode()
         onNavigate('home')
@@ -925,27 +827,39 @@ export function RecordingScreen({ onNavigate }: RecordingScreenProps) {
 
       // CRITICAL: Get actual recording duration from the recording object
       // This is the REAL duration that was actually recorded, not the timer
-      const finalStatus = await recordingRef.current.getStatusAsync()
+      const finalStatus = await currentRecording.getStatusAsync()
       let finalDurationMillis = 0
       
       // ALWAYS prioritize the actual recording duration from status
-      if (finalStatus.isLoaded && finalStatus.durationMillis !== undefined && finalStatus.durationMillis !== null) {
+      // Check for durationMillis property directly (works for both loaded and unloaded status)
+      if ('durationMillis' in finalStatus && finalStatus.durationMillis !== undefined && finalStatus.durationMillis !== null && finalStatus.durationMillis > 0) {
         finalDurationMillis = finalStatus.durationMillis
-        console.log('Using actual recording duration from status:', finalDurationMillis, 'ms')
+        console.log('✅ Using actual recording duration from status:', finalDurationMillis, 'ms')
       } else {
-        // If status doesn't have duration, the recording might have stopped early
-        // Try to get it one more time after a small delay
-        console.warn('Recording status missing duration, retrying...')
-        await new Promise(resolve => setTimeout(resolve, 200))
-        const retryStatus = await recordingRef.current.getStatusAsync()
-        if (retryStatus.isLoaded && retryStatus.durationMillis) {
+        // If status doesn't have duration, try to get it one more time after a small delay
+        console.warn('⚠️ Recording status missing duration, retrying...')
+        await new Promise(resolve => setTimeout(resolve, 300))
+        const retryStatus = await currentRecording.getStatusAsync()
+        if ('durationMillis' in retryStatus && retryStatus.durationMillis && retryStatus.durationMillis > 0) {
           finalDurationMillis = retryStatus.durationMillis
-          console.log('Got duration on retry:', finalDurationMillis, 'ms')
+          console.log('✅ Got duration on retry:', finalDurationMillis, 'ms')
         } else {
           // Last resort: use timer, but log a warning
-          console.warn('WARNING: Using timer duration as fallback - actual recording may be shorter!')
-          console.warn('Timer duration:', durationMillis, 'ms, Status duration:', retryStatus.durationMillis || 'N/A')
-          finalDurationMillis = startTimeRef.current ? (Date.now() - startTimeRef.current) : durationMillis
+          const timerDuration = startTimeRef.current ? (Date.now() - startTimeRef.current) : durationMillis
+          const statusDuration = ('durationMillis' in retryStatus ? retryStatus.durationMillis : 0) || ('durationMillis' in finalStatus ? finalStatus.durationMillis : 0) || 0
+          
+          console.warn('⚠️ WARNING: Using timer duration as fallback - actual recording may be shorter!')
+          console.warn('   Timer duration:', timerDuration, 'ms')
+          console.warn('   Status duration:', statusDuration, 'ms')
+          
+          // Use the larger of timer or status (status is more reliable if available)
+          finalDurationMillis = Math.max(timerDuration, statusDuration)
+          
+          if (statusDuration > 0 && timerDuration === 0) {
+            // Status has duration but timer doesn't - use status
+            finalDurationMillis = statusDuration
+            console.log('✅ Using status duration (timer was 0):', finalDurationMillis, 'ms')
+          }
         }
       }
       
@@ -967,7 +881,44 @@ export function RecordingScreen({ onNavigate }: RecordingScreenProps) {
 
       // Generate meeting ID and save
       const meetingId = await Crypto.randomUUID()
-      const permanentUri = await saveRecordingToPermanentLocation(uri, meetingId)
+      
+      // CRITICAL: Verify URI exists before trying to save
+      if (!uri) {
+        console.error('❌ No recording URI available - cannot save meeting')
+        Alert.alert(
+          'Error',
+          'No recording data available. The recording may not have been saved correctly.',
+          [{ text: 'OK', onPress: () => onNavigate('home') }]
+        )
+        return
+      }
+
+      console.log('💾 [RecordingScreen] Saving recording...')
+      console.log('   - URI:', uri)
+      console.log('   - Duration:', durationSeconds, 'seconds')
+      console.log('   - Meeting ID:', meetingId)
+
+      let permanentUri: string
+      try {
+        permanentUri = await saveRecordingToPermanentLocation(uri, meetingId)
+        console.log('✅ [RecordingScreen] Recording saved to:', permanentUri)
+        
+        // CRITICAL: Verify file exists before saving to database
+        const fileInfo = await FileSystem.getInfoAsync(permanentUri)
+        if (!fileInfo.exists) {
+          console.error('❌ [RecordingScreen] File does not exist after save!')
+          throw new Error(`File does not exist at saved location: ${permanentUri}`)
+        }
+        console.log('✅ [RecordingScreen] Verified file exists, size:', fileInfo.size, 'bytes')
+      } catch (saveError: any) {
+        console.error('❌ [RecordingScreen] Failed to save recording file:', saveError)
+        Alert.alert(
+          'Error Saving Recording',
+          `Failed to save the recording file: ${saveError?.message || 'Unknown error'}. The recording may not be available for playback.`,
+          [{ text: 'OK', onPress: () => onNavigate('home') }]
+        )
+        return
+      }
 
       // Create meeting record
       const meeting = await MeetingRepository.createMeeting({
@@ -977,7 +928,8 @@ export function RecordingScreen({ onNavigate }: RecordingScreenProps) {
         status: 'recorded',
       })
 
-      console.log('Meeting saved:', meeting.id)
+      console.log('✅ [RecordingScreen] Meeting saved to database:', meeting.id)
+      console.log('   - Audio URI:', meeting.local_audio_uri)
 
       // CRITICAL: Stop foreground service BEFORE navigation (Android)
       // This ensures the service is stopped and notification is removed
@@ -1017,9 +969,13 @@ export function RecordingScreen({ onNavigate }: RecordingScreenProps) {
       // Small delay to ensure all cleanup is complete before navigation
       await new Promise(resolve => setTimeout(resolve, 100))
 
-      // Navigate to home - this will unmount the recording screen
-      console.log('✅ Navigating to home after meeting saved')
-      onNavigate('home')
+      // Show saved toast
+      setShowSavedToast(true)
+      setTimeout(() => {
+        setShowSavedToast(false)
+        // Navigate to home after toast
+        onNavigate('home')
+      }, 2000)
     } catch (error) {
       console.error('❌ Error saving recording:', error)
       Alert.alert('Error', 'Failed to save recording. Please try again.')
@@ -1141,63 +1097,114 @@ export function RecordingScreen({ onNavigate }: RecordingScreenProps) {
         </Card>
       )}
 
-      {/* Recording Indicator */}
-      <View style={styles.recordingContainer}>
-        {isRecording ? (
-          <>
-            <View style={styles.recordingIndicator}>
-              <View style={styles.pulseRing1} />
-              <View style={styles.pulseRing2} />
-              <View style={styles.recordCircle}>
-                <View style={styles.recordCircleInner} />
-              </View>
+      {/* Failed State */}
+      {isFailed && (
+        <Card style={styles.errorCard}>
+          <View style={styles.errorContent}>
+            <Ionicons name="alert-circle" size={32} color={Colors.destructive} />
+            <Text style={styles.errorTitle}>Recording couldn't start</Text>
+            <Text style={styles.errorSubtitle}>
+              There was an error starting the recording. Please try again.
+            </Text>
+            <View style={styles.errorActions}>
+              <Button size="lg" onPress={resetRecordingEngine} style={styles.resetButton}>
+                Reset & Try Again
+              </Button>
+              {permissionStatus === 'denied' && (
+                <Button
+                  size="lg"
+                  variant="outline"
+                  onPress={() => Linking.openSettings()}
+                  style={styles.settingsButton}
+                >
+                  Open Settings
+                </Button>
+              )}
             </View>
-
-        {/* Timer */}
-            <View style={styles.timerContainer}>
-              <Text style={styles.timer}>{formatTime(durationMillis)}</Text>
-              <View style={styles.statusRow}>
-                {isPaused ? (
-                  <>
-                    <Ionicons name="pause" size={12} color={Colors.mutedForeground} />
-                    <Text style={styles.recordingText}>Paused</Text>
-                  </>
-                ) : (
-                  <>
-                    <View style={styles.recordingDot} />
-                    <Text style={styles.recordingText}>
-                      {isBackgroundRecording ? 'Recording in background' : 'Recording in progress'}
-                    </Text>
-                  </>
-                )}
-              </View>
-            </View>
-          </>
-          ) : (
-          <View style={styles.waitingContainer}>
-            <Ionicons name="mic" size={64} color={Colors.mutedForeground} />
-            <Text style={styles.waitingText}>Preparing to record...</Text>
           </View>
+        </Card>
+      )}
+
+      {/* Recording Indicator */}
+      {!isFailed && (
+        <View style={styles.recordingContainer}>
+          {isStarting ? (
+            <View style={styles.waitingContainer}>
+              <ActivityIndicator size="large" color={Colors.accent} />
+              <Text style={styles.waitingText}>Starting...</Text>
+            </View>
+          ) : isRecording ? (
+            <>
+              <View style={styles.recordingIndicator}>
+                <View style={styles.pulseRing1} />
+                <View style={styles.pulseRing2} />
+                <View style={styles.recordCircle}>
+                  <View style={styles.recordCircleInner} />
+                </View>
+              </View>
+
+              {/* Timer */}
+              <View style={styles.timerContainer}>
+                <Text style={styles.timer}>{formatTime(durationMillis)}</Text>
+                {/* Status Chip */}
+                <View style={styles.statusChip}>
+                  {isPaused ? (
+                    <>
+                      <Ionicons name="pause" size={12} color={Colors.mutedForeground} />
+                      <Text style={styles.statusChipText}>Paused</Text>
+                    </>
+                  ) : (
+                    <>
+                      <View style={styles.recordingDot} />
+                      <Text style={styles.statusChipText}>Recording</Text>
+                    </>
+                  )}
+                </View>
+              </View>
+            </>
+          ) : isStopping ? (
+            <View style={styles.waitingContainer}>
+              <ActivityIndicator size="large" color={Colors.accent} />
+              <Text style={styles.waitingText}>Stopping...</Text>
+            </View>
+          ) : (
+            <View style={styles.waitingContainer}>
+              <Ionicons name="mic" size={64} color={Colors.mutedForeground} />
+              <Text style={styles.waitingText}>Ready to record</Text>
+            </View>
           )}
-      </View>
+        </View>
+      )}
+
+      {/* Saved Toast */}
+      {showSavedToast && (
+        <View style={styles.toastContainer}>
+          <View style={styles.toast}>
+            <Ionicons name="checkmark-circle" size={20} color={Colors.accent} />
+            <Text style={styles.toastText}>Saved ✓</Text>
+          </View>
+        </View>
+      )}
 
       {/* Controls */}
       <View style={styles.controls}>
-        {isRecording && (
+        {isRecording && !isStopping && (
           <TouchableOpacity
             onPress={isPaused ? resumeRecording : pauseRecording}
             style={styles.controlButton}
             activeOpacity={0.7}
+            disabled={isStopping}
           >
             <Ionicons name={isPaused ? 'play' : 'pause'} size={24} color={Colors.foreground} />
           </TouchableOpacity>
         )}
 
-        {isRecording && (
+        {isRecording && !isStopping && (
           <TouchableOpacity
             onPress={stopRecording}
             style={styles.stopButton}
             activeOpacity={0.7}
+            disabled={isStopping}
           >
             <Ionicons name="stop" size={32} color={Colors.destructiveForeground} />
           </TouchableOpacity>
@@ -1386,6 +1393,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
+  statusChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: Colors.card,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    marginTop: 8,
+  },
+  statusChipText: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: Colors.foreground,
+  },
   recordingDot: {
     width: 8,
     height: 8,
@@ -1395,6 +1419,68 @@ const styles = StyleSheet.create({
   recordingText: {
     fontSize: 14,
     color: Colors.mutedForeground,
+  },
+  errorCard: {
+    marginVertical: 32,
+    padding: 24,
+    borderColor: Colors.destructive + '4D',
+    backgroundColor: Colors.destructive + '0D',
+  },
+  errorContent: {
+    alignItems: 'center',
+    gap: 12,
+  },
+  errorTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: Colors.foreground,
+    marginTop: 8,
+  },
+  errorSubtitle: {
+    fontSize: 14,
+    color: Colors.mutedForeground,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  errorActions: {
+    width: '100%',
+    gap: 12,
+    marginTop: 8,
+  },
+  resetButton: {
+    width: '100%',
+  },
+  settingsButton: {
+    width: '100%',
+  },
+  toastContainer: {
+    position: 'absolute',
+    top: 100,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  toast: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: Colors.card,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    shadowColor: Colors.foreground,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  toastText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: Colors.foreground,
   },
   waitingContainer: {
     alignItems: 'center',
@@ -1437,12 +1523,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 16,
     paddingVertical: 48,
-  },
-  errorTitle: {
-    fontSize: 20,
-    fontWeight: '500',
-    color: Colors.foreground,
-    textAlign: 'center',
   },
   errorText: {
     fontSize: 14,

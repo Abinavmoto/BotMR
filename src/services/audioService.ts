@@ -2,7 +2,12 @@
 import * as FileSystem from 'expo-file-system/legacy'
 import { Audio } from 'expo-av'
 
-const RECORDINGS_DIR = FileSystem.documentDirectory + 'recordings/'
+// Use documentDirectory as-is - FileSystem operations handle the file:// prefix automatically
+const RECORDINGS_DIR = (FileSystem.documentDirectory || '') + 'recordings/'
+
+// Log the directory format on module load
+console.log('📁 [AudioService] Document directory:', FileSystem.documentDirectory)
+console.log('📁 [AudioService] Recordings directory:', RECORDINGS_DIR)
 
 /**
  * Configure audio mode for background recording.
@@ -122,15 +127,44 @@ export async function resetAudioMode(): Promise<void> {
 }
 
 export async function ensureRecordingsDirectory(): Promise<void> {
-  const dirInfo = await FileSystem.getInfoAsync(RECORDINGS_DIR)
-  if (!dirInfo.exists) {
-    await FileSystem.makeDirectoryAsync(RECORDINGS_DIR, { intermediates: true })
+  try {
+    console.log('📁 [AudioService] Ensuring recordings directory exists...')
+    console.log('   - Path:', RECORDINGS_DIR)
+    
+    const dirInfo = await FileSystem.getInfoAsync(RECORDINGS_DIR)
+    console.log('   - Directory exists:', dirInfo.exists)
+    
+    if (!dirInfo.exists) {
+      console.log('   - Creating directory...')
+      await FileSystem.makeDirectoryAsync(RECORDINGS_DIR, { intermediates: true })
+      
+      // Verify it was created
+      const verifyInfo = await FileSystem.getInfoAsync(RECORDINGS_DIR)
+      if (!verifyInfo.exists) {
+        throw new Error(`Failed to create recordings directory: ${RECORDINGS_DIR}`)
+      }
+      console.log('✅ [AudioService] Directory created successfully')
+    } else {
+      console.log('✅ [AudioService] Directory already exists')
+    }
+  } catch (error) {
+    console.error('❌ [AudioService] Error ensuring recordings directory:', error)
+    throw error
   }
 }
 
 export async function getRecordingPath(meetingId: string): Promise<string> {
   await ensureRecordingsDirectory()
-  return `${RECORDINGS_DIR}${meetingId}.m4a`
+  const path = `${RECORDINGS_DIR}${meetingId}.m4a`
+  
+  // Log the path format for debugging
+  console.log('📁 [AudioService] Generated recording path:', path)
+  console.log('   - documentDirectory:', FileSystem.documentDirectory)
+  console.log('   - RECORDINGS_DIR:', RECORDINGS_DIR)
+  console.log('   - Full path:', path)
+  
+  // Return path as-is (FileSystem operations handle file:// prefix)
+  return path
 }
 
 export async function saveRecordingToPermanentLocation(
@@ -141,11 +175,19 @@ export async function saveRecordingToPermanentLocation(
     await ensureRecordingsDirectory()
     const permanentPath = await getRecordingPath(meetingId)
 
+    console.log('📁 [AudioService] Saving recording to permanent location...')
+    console.log('   - Temp URI:', tempUri)
+    console.log('   - Permanent path:', permanentPath)
+    console.log('   - Meeting ID:', meetingId)
+
     // Check if temp file exists
     const tempInfo = await FileSystem.getInfoAsync(tempUri)
     if (!tempInfo.exists) {
-      throw new Error('Temporary recording file not found')
+      console.error('❌ [AudioService] Temporary recording file not found:', tempUri)
+      throw new Error(`Temporary recording file not found: ${tempUri}`)
     }
+
+    console.log('✅ [AudioService] Temp file exists, size:', tempInfo.size, 'bytes')
 
     // Move file to permanent location
     await FileSystem.moveAsync({
@@ -153,11 +195,27 @@ export async function saveRecordingToPermanentLocation(
       to: permanentPath,
     })
 
+    console.log('✅ [AudioService] File moved to permanent location')
+
+    // CRITICAL: Verify file exists at permanent location
+    const permanentInfo = await FileSystem.getInfoAsync(permanentPath)
+    if (!permanentInfo.exists) {
+      console.error('❌ [AudioService] File does not exist at permanent location after move!')
+      throw new Error(`File does not exist at permanent location: ${permanentPath}`)
+    }
+
+    console.log('✅ [AudioService] Verified file exists at permanent location, size:', permanentInfo.size, 'bytes')
+    console.log('✅ [AudioService] File saved successfully:', permanentPath)
+    
+    // Return path as-is - FileSystem.documentDirectory already includes file:// prefix
+    // The path should already be in the correct format for Audio.Sound.createAsync
+    console.log('✅ [AudioService] Returning path:', permanentPath)
     return permanentPath
   } catch (error) {
-    console.error('Error saving recording:', error)
-    // If move fails, return temp URI as fallback
-    return tempUri
+    console.error('❌ [AudioService] Error saving recording:', error)
+    // Don't return temp URI as fallback - it might not exist
+    // Throw error so caller knows file wasn't saved
+    throw error
   }
 }
 
