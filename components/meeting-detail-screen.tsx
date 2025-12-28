@@ -12,6 +12,9 @@ import * as FileSystem from 'expo-file-system/legacy'
 
 import { NavigationHandler } from '@/src/types/navigation'
 
+// Helper to strip file:// while keeping the leading slash so FileSystem paths stay absolute
+const stripFileScheme = (uri: string) => uri.replace(/^file:\/{2,3}/, '/')
+
 interface MeetingDetailScreenProps {
   meetingId: string
   onNavigate: NavigationHandler
@@ -226,16 +229,12 @@ export function MeetingDetailScreen({ meetingId, onNavigate }: MeetingDetailScre
 
       // Normalize URI - FileSystem paths might already have file:// prefix
       let normalizedUri = meeting.local_audio_uri.trim()
-      
-      // Remove any duplicate file:// prefixes
-      while (normalizedUri.startsWith('file://')) {
-        normalizedUri = normalizedUri.substring(7)
-      }
+      // Remove the scheme so we always have an absolute path we can reuse
+      const pathWithoutScheme = stripFileScheme(normalizedUri)
       
       // Ensure we have a proper file:// URI
       if (!normalizedUri.startsWith('file://') && !normalizedUri.startsWith('http://') && !normalizedUri.startsWith('https://')) {
-        // Add file:// prefix
-        normalizedUri = `file://${normalizedUri}`
+        normalizedUri = `file://${pathWithoutScheme}`
       }
 
       console.log('   - Normalized URI:', normalizedUri)
@@ -249,7 +248,7 @@ export function MeetingDetailScreen({ meetingId, onNavigate }: MeetingDetailScre
       let fileInfo = null
       let finalUri = normalizedUri
       let actualFilePath: string | null = null
-      let fileSystemPath: string | null = null
+      let fileSystemPath: string | null = pathWithoutScheme
       
       try {
         fileInfo = await FileSystem.getInfoAsync(meeting.local_audio_uri)
@@ -257,7 +256,7 @@ export function MeetingDetailScreen({ meetingId, onNavigate }: MeetingDetailScre
           finalUri = meeting.local_audio_uri
           actualFilePath = meeting.local_audio_uri
           // Get the path without file:// prefix for FileSystem operations
-          fileSystemPath = meeting.local_audio_uri.replace(/^file:\/\/+/, '')
+          fileSystemPath = stripFileScheme(meeting.local_audio_uri)
           console.log('✅ [MeetingDetail] File exists at original URI')
           console.log('   - FileSystem path (no prefix):', fileSystemPath)
         }
@@ -268,7 +267,7 @@ export function MeetingDetailScreen({ meetingId, onNavigate }: MeetingDetailScre
       if (!fileInfo || !fileInfo.exists) {
         try {
           // Remove file:// to check with FileSystem
-          const checkUri = normalizedUri.startsWith('file://') ? normalizedUri.substring(7) : normalizedUri
+          const checkUri = stripFileScheme(normalizedUri)
           fileInfo = await FileSystem.getInfoAsync(checkUri)
           if (fileInfo.exists) {
             finalUri = normalizedUri
@@ -312,7 +311,7 @@ export function MeetingDetailScreen({ meetingId, onNavigate }: MeetingDetailScre
       
       // Use the FileSystem path (without file:// prefix) as the base
       // This is the actual path that FileSystem verified exists
-      const basePath = fileSystemPath || finalUri.replace(/^file:\/\/+/, '')
+      const basePath = fileSystemPath || stripFileScheme(finalUri)
       
       console.log('   - Base path (from FileSystem):', basePath)
       
@@ -340,12 +339,24 @@ export function MeetingDetailScreen({ meetingId, onNavigate }: MeetingDetailScre
         const twoSlashUri = `file://${basePath}`
         uriFormats.push({ name: 'file:// (two slashes)', uri: twoSlashUri })
       }
+
+      // Priority 3: Android content URI (resolves sandbox path reliably)
+      if (Platform.OS === 'android' && basePath) {
+        try {
+          const contentUri = await FileSystem.getContentUriAsync(basePath)
+          if (contentUri) {
+            uriFormats.push({ name: 'content:// (android)', uri: contentUri })
+          }
+        } catch (contentErr) {
+          console.warn('⚠️ [MeetingDetail] Could not get content URI:', contentErr)
+        }
+      }
       
-      // Priority 3: Original URI from database (file:///data/...)
+      // Priority 4: Original URI from database (file:///data/...)
       // This is the "correct" format but expo-av has a bug with it
       uriFormats.push({ name: 'Original (file:///data/...)', uri: finalUri })
       
-      // Priority 4: Try with file:/// prefix (three slashes)
+      // Priority 5: Try with file:/// prefix (three slashes)
       if (basePath && basePath.startsWith('/')) {
         const threeSlashUri = `file:///${basePath}`
         if (!uriFormats.some(f => f.uri === threeSlashUri)) {
@@ -353,7 +364,7 @@ export function MeetingDetailScreen({ meetingId, onNavigate }: MeetingDetailScre
         }
       }
       
-      // Priority 5: Workaround - try path without /data (expo-av bug workaround)
+      // Priority 6: Workaround - try path without /data (expo-av bug workaround)
       // expo-av might be stripping /data, so try the path it's actually looking for
       if (basePath && basePath.startsWith('/data/')) {
         const withoutData = basePath.replace(/^\/data/, '')
