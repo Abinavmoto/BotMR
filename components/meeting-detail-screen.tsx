@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react'
-import { View, Text, StyleSheet, ScrollView, Alert } from 'react-native'
+import React, { useState, useEffect, useRef } from 'react'
+import { View, Text, StyleSheet, ScrollView, Alert, AppState, AppStateStatus } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { Audio } from 'expo-av'
 import { Button } from '@/components/ui/button'
@@ -20,15 +20,45 @@ export function MeetingDetailScreen({ meetingId, onNavigate }: MeetingDetailScre
   const [isPlaying, setIsPlaying] = useState(false)
   const [playbackPosition, setPlaybackPosition] = useState(0)
   const [duration, setDuration] = useState(0)
+  const appStateRef = useRef<AppStateStatus>(AppState.currentState)
 
   useEffect(() => {
     loadMeeting()
+    
+    // CRITICAL: Update app state ref when component mounts
+    // This ensures the ref is current when user navigates to this screen
+    appStateRef.current = AppState.currentState
+    
     return () => {
       if (sound) {
-        sound.unloadAsync()
+        sound.unloadAsync().catch((error) => {
+          console.warn('Error unloading sound on cleanup:', error)
+        })
       }
     }
   }, [meetingId])
+
+  // Track app state changes separately to handle background audio pause
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextAppState) => {
+      appStateRef.current = nextAppState
+      
+      // If app goes to background while playing, pause playback
+      if (nextAppState.match(/inactive|background/) && isPlaying && sound) {
+        sound.pauseAsync().catch((error: any) => {
+          // Suppress errors when pausing due to backgrounding
+          const errorMessage = error?.message || ''
+          if (!errorMessage.includes('AudioFocusNotAcquiredException')) {
+            console.warn('Error pausing audio when app backgrounded:', error)
+          }
+        })
+      }
+    })
+    
+    return () => {
+      subscription.remove()
+    }
+  }, [isPlaying, sound])
 
   useEffect(() => {
     if (sound) {
@@ -81,22 +111,81 @@ export function MeetingDetailScreen({ meetingId, onNavigate }: MeetingDetailScre
   }
 
   const playPause = async () => {
+    // CRITICAL: Always check current state, not cached ref
+    // The ref might be stale if user just navigated to this screen
+    const currentAppState = AppState.currentState
+    const cachedState = appStateRef.current
+    
+    // Update ref with current state
+    appStateRef.current = currentAppState
+    
+    // Only block if app is definitely backgrounded
+    // Allow if app is active or inactive (inactive is OK for foreground playback)
+    if (currentAppState === 'background') {
+      Alert.alert(
+        'App in Background',
+        'Audio playback requires the app to be in the foreground. Please bring the app to the foreground to play audio.',
+        [{ text: 'OK' }]
+      )
+      return
+    }
+    
+    // If state is 'inactive', it might be a false positive (e.g., during navigation)
+    // Try to proceed but check again right before playback
+
     if (!sound) {
       await loadSound()
       // Wait a moment for sound to load, then play
       setTimeout(async () => {
         try {
-          if (sound) {
+          // Double-check app state before playing
+          if (AppState.currentState === 'active' && sound) {
             await sound.playAsync()
+          } else {
+            console.warn('App is not active, cannot play audio')
+            Alert.alert(
+              'App in Background',
+              'Audio playback requires the app to be in the foreground. Please bring the app to the foreground to play audio.',
+              [{ text: 'OK' }]
+            )
           }
         } catch (error) {
           console.error('Error playing audio after load:', error)
+          handlePlaybackError(error)
         }
       }, 100)
       return
     }
 
     try {
+      // CRITICAL: Check current state (not cached) - only block if backgrounded
+      const currentState = AppState.currentState
+      
+      // Only block if definitely backgrounded
+      if (currentState === 'background') {
+        Alert.alert(
+          'App in Background',
+          'Audio playback requires the app to be in the foreground. Please bring the app to the foreground to play audio.',
+          [{ text: 'OK' }]
+        )
+        return
+      }
+      
+      // If inactive, wait a moment and check again (might be transitioning)
+      if (currentState === 'inactive') {
+        await new Promise(resolve => setTimeout(resolve, 200))
+        const recheckState = AppState.currentState
+        if (recheckState === 'background') {
+          Alert.alert(
+            'App in Background',
+            'Audio playback requires the app to be in the foreground. Please bring the app to the foreground to play audio.',
+            [{ text: 'OK' }]
+          )
+          return
+        }
+        // If now active, proceed
+      }
+
       // Ensure audio mode is set for playback (only if not currently recording)
       try {
         await Audio.setAudioModeAsync({
@@ -104,6 +193,8 @@ export function MeetingDetailScreen({ meetingId, onNavigate }: MeetingDetailScre
           playsInSilentModeIOS: true,
           staysActiveInBackground: false,
         })
+        // Small delay to ensure audio mode is set
+        await new Promise(resolve => setTimeout(resolve, 100))
       } catch (audioModeError) {
         console.warn('Error setting audio mode for playback (non-critical):', audioModeError)
         // Continue anyway - playback might still work
@@ -112,11 +203,58 @@ export function MeetingDetailScreen({ meetingId, onNavigate }: MeetingDetailScre
       if (isPlaying) {
         await sound.pauseAsync()
       } else {
+        // Final check before playing - only block if backgrounded
+        const finalState = AppState.currentState
+        if (finalState === 'background') {
+          console.warn('App is in background, cannot play audio')
+          Alert.alert(
+            'App in Background',
+            'Audio playback requires the app to be in the foreground. Please bring the app to the foreground to play audio.',
+            [{ text: 'OK' }]
+          )
+          return
+        }
+        
+        // Proceed with playback (active or inactive is OK)
         await sound.playAsync()
       }
-    } catch (error) {
+    } catch (error: any) {
+      // Suppress AudioFocusNotAcquiredException - it's expected when backgrounded
+      const errorMessage = error?.message || ''
+      if (errorMessage.includes('AudioFocusNotAcquiredException') || 
+          errorMessage.includes('background')) {
+        console.warn('Audio focus not available (app may be backgrounded) - ignoring error')
+        // Don't show alert - user might have backgrounded intentionally
+        return
+      }
       console.error('Error playing/pausing audio:', error)
-      Alert.alert('Playback Error', 'Failed to play audio. Please try again.')
+      handlePlaybackError(error)
+    }
+  }
+
+  const handlePlaybackError = (error: any) => {
+    const errorMessage = error?.message || 'Unknown error'
+    
+    // Check for specific error types
+    if (errorMessage.includes('AudioFocusNotAcquiredException') || 
+        errorMessage.includes('background')) {
+      Alert.alert(
+        'App in Background',
+        'Audio playback requires the app to be in the foreground. Please bring the app to the foreground to play audio.',
+        [{ text: 'OK' }]
+      )
+    } else if (errorMessage.includes('permission') || errorMessage.includes('denied')) {
+      Alert.alert(
+        'Permission Error',
+        'Audio playback permission is required. Please check your app permissions in Settings.',
+        [{ text: 'OK' }]
+      )
+    } else {
+      Alert.alert(
+        'Playback Error',
+        'Failed to play audio. Please try again. If the problem persists, restart the app.',
+        [{ text: 'OK' }]
+      )
     }
   }
 

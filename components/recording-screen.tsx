@@ -851,22 +851,59 @@ export function RecordingScreen({ onNavigate }: RecordingScreenProps) {
     try {
       // Stop foreground service on Android
       if (Platform.OS === 'android') {
-        await stopForegroundService()
+        try {
+          await stopForegroundService()
+          console.log('✅ [stopRecordingInternal] Foreground service stopped')
+        } catch (error) {
+          console.warn('⚠️ [stopRecordingInternal] Error stopping foreground service:', error)
+        }
       } else {
-        await cancelRecordingNotification()
+        try {
+          await cancelRecordingNotification()
+        } catch (error) {
+          console.warn('⚠️ [stopRecordingInternal] Error canceling notification:', error)
+        }
       }
+      
       setForegroundServiceActive(false)
       foregroundServiceNotificationIdRef.current = null
       
+      // CRITICAL: Stop and unload recording
       if (recordingRef.current) {
-        await recordingRef.current.stopAndUnloadAsync()
+        try {
+          await recordingRef.current.stopAndUnloadAsync()
+          console.log('✅ [stopRecordingInternal] Recording stopped and unloaded')
+        } catch (error) {
+          console.warn('⚠️ [stopRecordingInternal] Error stopping recording:', error)
+          // Try to unload even if stop fails
+          try {
+            await recordingRef.current.unloadAsync()
+          } catch (unloadError) {
+            console.warn('⚠️ [stopRecordingInternal] Error unloading recording:', unloadError)
+          }
+        }
         recordingRef.current = null
         setRecording(null)
-        setIsRecording(false)
-        setIsPaused(false)
+      }
+      
+      // Clear all state
+      setIsRecording(false)
+      setIsPaused(false)
+      setIsBackgroundRecording(false)
+      setDurationMillis(0)
+      startTimeRef.current = null
+      
+      // Clear any intervals
+      if (statusIntervalRef.current) {
+        clearInterval(statusIntervalRef.current)
+        statusIntervalRef.current = null
+      }
+      if (interruptionCheckRef.current) {
+        clearInterval(interruptionCheckRef.current)
+        interruptionCheckRef.current = null
       }
     } catch (error) {
-      console.error('Error stopping recording:', error)
+      console.error('❌ [stopRecordingInternal] Error stopping recording:', error)
     }
   }
 
@@ -942,21 +979,75 @@ export function RecordingScreen({ onNavigate }: RecordingScreenProps) {
 
       console.log('Meeting saved:', meeting.id)
 
-      // Stop foreground service (Android) or cancel notification (iOS)
+      // CRITICAL: Stop foreground service BEFORE navigation (Android)
+      // This ensures the service is stopped and notification is removed
       if (Platform.OS === 'android') {
-        await stopForegroundService()
+        try {
+          await stopForegroundService()
+          console.log('✅ Foreground service stopped after meeting saved')
+        } catch (error) {
+          console.warn('⚠️ Error stopping foreground service (non-critical):', error)
+        }
       } else {
-        await cancelRecordingNotification()
+        try {
+          await cancelRecordingNotification()
+        } catch (error) {
+          console.warn('⚠️ Error canceling notification (non-critical):', error)
+        }
       }
-      await showRecordingStoppedNotification(meeting.title)
 
-      // Navigate to home
+      // Show completion notification
+      try {
+        await showRecordingStoppedNotification(meeting.title)
+      } catch (error) {
+        console.warn('⚠️ Error showing completion notification (non-critical):', error)
+      }
+
+      // CRITICAL: Clear all state and refs before navigation
+      setDurationMillis(0)
+      setIsRecording(false)
+      setIsPaused(false)
+      setIsBackgroundRecording(false)
+      setForegroundServiceActive(false)
+      setInterruptionMessage(null)
+      startTimeRef.current = null
+      recordingRef.current = null
+      setRecording(null)
+
+      // Small delay to ensure all cleanup is complete before navigation
+      await new Promise(resolve => setTimeout(resolve, 100))
+
+      // Navigate to home - this will unmount the recording screen
+      console.log('✅ Navigating to home after meeting saved')
       onNavigate('home')
     } catch (error) {
-      console.error('Error saving recording:', error)
+      console.error('❌ Error saving recording:', error)
       Alert.alert('Error', 'Failed to save recording. Please try again.')
+      
+      // Ensure complete cleanup on error
       await stopRecordingInternal()
-      await resetAudioMode()
+      try {
+        await resetAudioMode()
+      } catch (resetError) {
+        console.warn('⚠️ Error resetting audio mode:', resetError)
+      }
+      
+      // Clear all state
+      setDurationMillis(0)
+      setIsRecording(false)
+      setIsPaused(false)
+      setIsBackgroundRecording(false)
+      setForegroundServiceActive(false)
+      setInterruptionMessage(null)
+      startTimeRef.current = null
+      recordingRef.current = null
+      setRecording(null)
+      
+      // Small delay before navigation
+      await new Promise(resolve => setTimeout(resolve, 100))
+      
+      // Navigate to home
+      console.log('✅ Navigating to home after error')
       onNavigate('home')
     }
   }

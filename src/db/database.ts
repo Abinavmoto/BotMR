@@ -7,6 +7,7 @@ export async function openDatabase(): Promise<SQLite.SQLiteDatabase> {
     return db
   }
 
+  // Open new database connection
   db = await SQLite.openDatabaseAsync('botmr.db')
   await runMigrations()
   return db
@@ -46,16 +47,24 @@ async function runMigrations() {
 
 export async function runQuery(sql: string, params: any[] = []): Promise<SQLite.SQLiteRunResult> {
   const database = await openDatabase()
-  return await database.runAsync(sql, params)
+  // Ensure params is always an array
+  const safeParams = Array.isArray(params) ? params : []
+  return await database.runAsync(sql, safeParams)
 }
 
 export async function getQuery<T = any>(sql: string, params: any[] = []): Promise<T | null> {
   const database = await openDatabase()
-  const result = await database.getFirstAsync<T>(sql, params)
+  // Ensure params is always an array
+  const safeParams = Array.isArray(params) ? params : []
+  const result = await database.getFirstAsync<T>(sql, safeParams)
   return result || null
 }
 
 export async function getAllQuery<T = any>(sql: string, params: any[] = []): Promise<T[]> {
   const database = await openDatabase()
-  return await database.getAllAsync<T>(sql, params)
+  // Ensure params is always an array
+  const safeParams = Array.isArray(params) ? params : []
+  const results = await database.getAllAsync<T>(sql, safeParams)
+  // Ensure we always return an array
+  return Array.isArray(results) ? results : []
 }

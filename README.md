@@ -2,6 +2,18 @@
 
 This is a React Native mobile app built with Expo, converted from a Next.js web application.
 
+## 📋 Project Status
+
+**👉 See [PROJECT_STATUS.md](./PROJECT_STATUS.md) for complete project context, implemented features, and pending work.**
+
+Quick Summary:
+- ✅ **Core Recording**: Fully implemented with background support
+- ✅ **Database**: SQLite with full CRUD operations
+- ✅ **UI Screens**: 8 screens implemented
+- ✅ **Background Recording**: Android & iOS support
+- ❌ **Backend Integration**: Not yet implemented
+- ❌ **Processing/Transcription**: UI ready, backend pending
+
 ## Getting Started
 
 ### Prerequisites
