@@ -78,3 +78,4 @@ Before considering a feature complete:
 ---
 
 **Remember**: This app focuses on **offline-first** functionality. Always ensure features work without internet connection first, then add online sync.
+

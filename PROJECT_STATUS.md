@@ -603,3 +603,4 @@ eas build --platform ios --profile development
 **Expo SDK**: 54.0.0
 **React Native**: 0.81.5
 **Status**: Core features complete, backend integration pending
+
